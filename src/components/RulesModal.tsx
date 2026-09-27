@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Crown, Shield, Swords, Navigation, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { X, Crown, Star, Sword, Navigation, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { UNIT_DEFINITIONS } from '../types/game';
 
 interface RulesModalProps {
@@ -40,8 +40,8 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               <span>Victory Condition: Regicide</span>
             </div>
             <p className="text-slate-300 text-xs leading-relaxed">
-              The war ends the moment an opponent's <strong className="text-white">Level 4 Sovereign</strong> is eliminated. 
-              Protect your Sovereign at all costs while staging a tactical breach to destroy the enemy commander.
+              The war ends the moment an opponent's <strong className="text-white">Level 4 King</strong> is eliminated. 
+              Protect your King at all costs while staging a tactical breach to destroy the enemy commander.
             </p>
           </div>
 
@@ -58,11 +58,11 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                 </div>
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-xs">Level 4: Sovereign</span>
+                    <span className="font-bold text-white text-xs">Level 4: King</span>
                     <span className="text-[10px] font-mono text-amber-400">1 Unit · Speed 1 · Aura 4</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Supreme Commander. Moves 1 tile. Projects a Level 4 aura (+4 combat support). Defeat brings instant victory.
+                    Leader of the army. Moves 1 tile. Projects a Level 4 aura (+4 combat support). Defeat brings instant victory.
                   </p>
                 </div>
               </div>
@@ -70,15 +70,15 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               {/* Level 3 */}
               <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex gap-3">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-b from-emerald-600 to-emerald-800 flex items-center justify-center shrink-0">
-                  <Shield className="w-5 h-5 text-white" />
+                  <Star className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-xs">Level 3: Sentinel</span>
+                    <span className="font-bold text-white text-xs">Level 3: General</span>
                     <span className="text-[10px] font-mono text-emerald-400">2 Units · Speed 2 · Aura 3</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Heavy bastion. Moves 2 tiles. Projects a Level 3 aura (+3 combat support).
+                    Senior commander. Moves 2 tiles. Projects a Level 3 aura (+3 combat support).
                   </p>
                 </div>
               </div>
@@ -86,15 +86,15 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               {/* Level 2 */}
               <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex gap-3">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-b from-sky-600 to-sky-800 flex items-center justify-center shrink-0">
-                  <Swords className="w-5 h-5 text-white" />
+                  <Sword className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-xs">Level 2: Warden</span>
+                    <span className="font-bold text-white text-xs">Level 2: Captain</span>
                     <span className="text-[10px] font-mono text-sky-400">3 Units · Speed 3 · Aura 2</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Tactical skirmisher. Moves 3 tiles. Projects a Level 2 aura (+2 combat support).
+                    Frontline officer. Moves 3 tiles. Projects a Level 2 aura (+2 combat support).
                   </p>
                 </div>
               </div>
@@ -168,7 +168,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                 ⚔️ <strong>Attack Rank:</strong> An attacker's attack rank is its <strong>own rank plus the sum of aura ranks of friendly allies adjacent to the target</strong>. Flanking with high-rank auras allows you to defeat fortified enemies!
               </div>
               <div>
-                👑 <strong>Capturing Level 4 Sovereigns:</strong> To capture a unit, combined <strong>Attack Rank must exceed Defensive Rank</strong>. A lone Level 4 Sovereign (DEF 4) requires a combined Attack Rank of <strong>5 or more</strong>.
+                👑 <strong>Capturing Level 4 Kings:</strong> To capture a unit, combined <strong>Attack Rank must exceed Defensive Rank</strong>. A lone Level 4 King (DEF 4) requires a combined Attack Rank of <strong>5 or more</strong>.
               </div>
             </div>
           </div>

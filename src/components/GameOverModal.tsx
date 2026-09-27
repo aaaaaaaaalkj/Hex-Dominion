@@ -81,8 +81,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           </h2>
           <p className="text-xs text-slate-400">
             {isPlayerWinner
-              ? 'You struck down the AI Sovereign and seized control of the battlefield!'
-              : 'Your Sovereign was struck down by the enemy.'}
+              ? 'You struck down the AI King and seized control of the battlefield!'
+              : 'Your King was struck down by the enemy.'}
           </p>
         </div>
 

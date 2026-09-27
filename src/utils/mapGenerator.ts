@@ -36,13 +36,13 @@ export function generateGameMap(): GeneratedMap {
   /**
    * Deployment Layout Specifications:
    * - 1st Row (Back rank):
-   *   - Center: Level 2 Warden (anchoring the backline)
-   *   - Flanked by: Level 3 Sentinels
-   *   - Each corner: Level 2 Warden
+   *   - Center: Level 2 Captain (anchoring the backline)
+   *   - Flanked by: Level 3 Generals
+   *   - Each corner: Level 2 Captain
    * - 2nd Row (Middle rank, in front):
    *   - 4x Level 1 Scouts
    * - 3rd Row (Front rank):
-   *   - Middle: Level 4 Sovereign (leading from the vanguard)
+   *   - Middle: Level 4 King (leading from the vanguard)
    */
 
   // Player Deployment (Southern base: r = 4, 3, 2)
@@ -60,8 +60,8 @@ export function generateGameMap(): GeneratedMap {
     { rank: 1, coord: { q: -1, r: 3 }, id: 'player-l1-scout-3' },
     { rank: 1, coord: { q: 0, r: 3 }, id: 'player-l1-scout-4' },
 
-    // 3rd row (r = 2): Level 4 Sovereign at the front vanguard
-    { rank: 4, coord: { q: -1, r: 2 }, id: 'player-l4-sovereign' },
+    // 3rd row (r = 2): Level 4 King at the front vanguard
+    { rank: 4, coord: { q: -1, r: 2 }, id: 'player-l4-king' },
   ];
 
   // AI Deployment (Northern base: r = -4, -3, -2, symmetric mirror across center)
@@ -79,8 +79,8 @@ export function generateGameMap(): GeneratedMap {
     { rank: 1, coord: { q: 2, r: -3 }, id: 'ai-l1-scout-3' },
     { rank: 1, coord: { q: 3, r: -3 }, id: 'ai-l1-scout-4' },
 
-    // 3rd row (r = -2): Level 4 Sovereign at the front vanguard
-    { rank: 4, coord: { q: 1, r: -2 }, id: 'ai-l4-sovereign' },
+    // 3rd row (r = -2): Level 4 King at the front vanguard
+    { rank: 4, coord: { q: 1, r: -2 }, id: 'ai-l4-king' },
   ];
 
   const units: Unit[] = [];

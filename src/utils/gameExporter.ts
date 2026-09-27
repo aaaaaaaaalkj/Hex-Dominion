@@ -31,9 +31,9 @@ export function generateGameLogText(data: GameExportData): string {
 
   let resultStr = 'IN PROGRESS';
   if (winner === 'player') {
-    resultStr = 'PLAYER VICTORY (AI Sovereign Eliminated)';
+    resultStr = 'PLAYER VICTORY (AI King Eliminated)';
   } else if (winner === 'ai') {
-    resultStr = 'AI DEFEAT (Player Sovereign Eliminated)';
+    resultStr = 'AI DEFEAT (Player King Eliminated)';
   }
 
   const lines: string[] = [];
@@ -67,7 +67,7 @@ export function generateGameLogText(data: GameExportData): string {
         lines.push(`Odds:       ATK ${lastMove.attackRank} vs DEF ${lastMove.defenseRank}`);
       }
       if (lastMove.isWinningMove) {
-        lines.push(`Outcome:    *** FATAL STRIKE: Opponent Sovereign eliminated! GAME OVER ***`);
+        lines.push(`Outcome:    *** FATAL STRIKE: Opponent King eliminated! GAME OVER ***`);
       }
     } else {
       lines.push('Action:     Maneuver');

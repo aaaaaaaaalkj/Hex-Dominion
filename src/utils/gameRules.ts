@@ -24,9 +24,9 @@ export function getUnitAuraRank(rank: UnitRank): number {
 /**
  * Returns the movement speed (maximum tile distance) of a unit:
  * Speed is the inverse of rank:
- * - Level 4 Sovereign: 1 tile
- * - Level 3 Sentinel: 2 tiles
- * - Level 2 Warden: 3 tiles
+ * - Level 4 King: 1 tile
+ * - Level 3 General: 2 tiles
+ * - Level 2 Captain: 3 tiles
  * - Level 1 Scout: 4 tiles
  */
 export function getUnitSpeed(rank: UnitRank): number {

@@ -25,16 +25,16 @@ export interface AIMoveChoice {
 }
 
 const RANK_VALUES: Record<UnitRank, number> = {
-  4: 100000, // Sovereign (Game loss if lost)
-  3: 4500,   // Sentinel
-  2: 2200,   // Warden
+  4: 100000, // King (Game loss if lost)
+  3: 4500,   // General
+  2: 2200,   // Captain
   1: 1000,   // Scout
 };
 
 /**
  * Finds the best tactical move for the AI using Grandmaster heuristics:
  * - Master-level combined rank combat calculations (defensive support + flanking attack rank)
- * - Active escort clustering around AI Sovereign to maximize its defensive rank
+ * - Active escort clustering around AI King to maximize its defensive rank
  * - Full awareness of player combined attack reach and round boundary resets
  * - Flanking opportunities to gang up on high-value player pieces
  */
@@ -55,10 +55,10 @@ export function chooseAIMove(
   const playerUnits = units.filter((u) => u.team === 'player' && !u.isDefeated);
   const friendlyUnits = units.filter((u) => u.team === 'ai' && !u.isDefeated);
 
-  const aiSovereign = units.find(
+  const aiKing = units.find(
     (u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated
   );
-  const playerSovereign = units.find(
+  const playerKing = units.find(
     (u) => u.team === 'player' && u.rank === 4 && !u.isDefeated
   );
 
@@ -79,8 +79,8 @@ export function chooseAIMove(
         units,
         playerUnits,
         friendlyUnits,
-        aiSovereign,
-        playerSovereign,
+        aiKing,
+        playerKing,
         candidateUnits.length,
         isLastMoveOfRound
       );
@@ -111,42 +111,42 @@ function evaluateGrandmasterMove(
   units: Unit[],
   playerUnits: Unit[],
   friendlyUnits: Unit[],
-  aiSovereign: Unit | undefined,
-  playerSovereign: Unit | undefined,
+  aiKing: Unit | undefined,
+  playerKing: Unit | undefined,
   aiCandidateCount: number,
   isLastMoveOfRound: boolean
 ): { score: number; explanation: string } {
   let score = 0;
   let explanation = 'Tactical positioning';
 
-  // 1. INSTANT WIN: Assassinate Player Sovereign (Rank 4)
+  // 1. INSTANT WIN: Assassinate Player King (Rank 4)
   if (move.isAttack && move.targetUnitRank === 4) {
     return {
       score: 1000000,
-      explanation: 'Strike down player Sovereign to win the war!',
+      explanation: 'Strike down player King to win the war!',
     };
   }
 
   // 2. SIMULATE BOARD AFTER THIS MOVE
   const { newUnits: simUnits } = applyMove(unit.id, move, units);
 
-  const simAiSovereign = simUnits.find(
+  const simAiKing = simUnits.find(
     (u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated
   );
-  const simPlayerSovereign = simUnits.find(
+  const simPlayerKing = simUnits.find(
     (u) => u.team === 'player' && u.rank === 4 && !u.isDefeated
   );
 
-  if (!simAiSovereign) {
-    return { score: -2000000, explanation: 'Fatal blunder: loses Sovereign' };
+  if (!simAiKing) {
+    return { score: -2000000, explanation: 'Fatal blunder: loses King' };
   }
 
-  // 3. COMBINED RANK DEFENSE CHECK FOR AI SOVEREIGN
-  // Calculate AI Sovereign's defensive rank on the simulated board (4 + friendly neighbors)
-  const aiSovereignDefRank = calculateDefensiveRank(simAiSovereign, simUnits);
+  // 3. COMBINED RANK DEFENSE CHECK FOR AI KING
+  // Calculate AI King's defensive rank on the simulated board (4 + friendly neighbors)
+  const aiKingDefRank = calculateDefensiveRank(simAiKing, simUnits);
 
-  // Check if any Player unit can reach and defeat AI Sovereign
-  // Under the new rule, an attack succeeds if playerAttackRank > aiSovereignDefRank
+  // Check if any Player unit can reach and defeat AI King
+  // Under the new rule, an attack succeeds if playerAttackRank > aiKingDefRank
   for (const pu of playerUnits) {
     const testPlayerUnit: Unit = {
       ...pu,
@@ -160,54 +160,54 @@ function evaluateGrandmasterMove(
     );
 
     const fatalMove = playerMoves.find(
-      (m) => m.isAttack && m.targetUnitId === simAiSovereign.id
+      (m) => m.isAttack && m.targetUnitId === simAiKing.id
     );
 
     if (fatalMove) {
       return {
         score: -2000000,
-        explanation: 'FATAL: Leaves AI Sovereign vulnerable to combined-rank assassination!',
+        explanation: 'FATAL: Leaves AI King vulnerable to combined-rank assassination!',
       };
     }
   }
 
-  // If Player Sovereign is near, check proximity
-  if (simPlayerSovereign) {
-    const distToPlayerSovereign = hexDistance(
-      simAiSovereign.coord,
-      simPlayerSovereign.coord
+  // If Player King is near, check proximity
+  if (simPlayerKing) {
+    const distToPlayerKing = hexDistance(
+      simAiKing.coord,
+      simPlayerKing.coord
     );
-    if (distToPlayerSovereign <= 4 && aiSovereignDefRank <= 4) {
+    if (distToPlayerKing <= 4 && aiKingDefRank <= 4) {
       score -= 100000; // Dangerously isolated near player frontline
     }
   }
 
-  // 4. SOVEREIGN DISCIPLINE & FORMATION (RANK 4)
+  // 4. KING DISCIPLINE & FORMATION (RANK 4)
   if (unit.rank === 4) {
     // Highly reward staying surrounded by bodyguards (each guard adds to defensive rank!)
-    score += (aiSovereignDefRank - 4) * 4000;
+    score += (aiKingDefRank - 4) * 4000;
 
     // Discourage reckless overextension into the player's half if undefended
-    if (aiSovereignDefRank <= 4 && move.target.r >= 0) {
+    if (aiKingDefRank <= 4 && move.target.r >= 0) {
       score -= 50000;
     }
   }
 
-  // 5. BODYGUARD & COMBINED RANK FORMATIONS (FOR SENTINELS & WARDENS)
-  // Moving friendly units adjacent to the AI Sovereign directly adds to its Defensive Rank!
-  if (unit.rank !== 4 && simAiSovereign) {
-    const distToSovereign = hexDistance(move.target, simAiSovereign.coord);
-    if (distToSovereign === 1) {
-      // Each adjacent ally adds its rank to the Sovereign's defensive rank
+  // 5. BODYGUARD & COMBINED RANK FORMATIONS (FOR GENERALS & CAPTAINS)
+  // Moving friendly units adjacent to the AI King directly adds to its Defensive Rank!
+  if (unit.rank !== 4 && simAiKing) {
+    const distToKing = hexDistance(move.target, simAiKing.coord);
+    if (distToKing === 1) {
+      // Each adjacent ally adds its rank to the King's defensive rank
       const defRankBoost = getUnitAuraRank(unit.rank);
       score += defRankBoost * 3000;
-      explanation = `Bolster Sovereign defensive rank (+${defRankBoost} DEF)`;
+      explanation = `Bolster King defensive rank (+${defRankBoost} DEF)`;
     }
 
-    // If unit was already adjacent to Sovereign and moves away, penalize decreasing Sovereign DEF
-    const prevDistToSovereign = hexDistance(unit.coord, simAiSovereign.coord);
-    if (prevDistToSovereign === 1 && distToSovereign > 1) {
-      score -= getUnitAuraRank(unit.rank) * 3500; // Stripping defense from Sovereign!
+    // If unit was already adjacent to King and moves away, penalize decreasing King DEF
+    const prevDistToKing = hexDistance(unit.coord, simAiKing.coord);
+    if (prevDistToKing === 1 && distToKing > 1) {
+      score -= getUnitAuraRank(unit.rank) * 3500; // Stripping defense from King!
     }
   }
 
@@ -264,9 +264,9 @@ function evaluateGrandmasterMove(
 
 function getRankName(rank: UnitRank): string {
   switch (rank) {
-    case 4: return 'Sovereign';
-    case 3: return 'Sentinel';
-    case 2: return 'Warden';
+    case 4: return 'King';
+    case 3: return 'General';
+    case 2: return 'Captain';
     case 1: return 'Scout';
   }
 }

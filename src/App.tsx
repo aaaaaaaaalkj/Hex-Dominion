@@ -429,8 +429,8 @@ export default function App() {
     const playerDefeats = units.filter((u) => u.team === 'player' && u.isDefeated).length;
     const aiDefeats = units.filter((u) => u.team === 'ai' && u.isDefeated).length;
 
-    const playerSovereignAlive = units.some((u) => u.team === 'player' && u.rank === 4 && !u.isDefeated);
-    const aiSovereignAlive = units.some((u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated);
+    const playerKingAlive = units.some((u) => u.team === 'player' && u.rank === 4 && !u.isDefeated);
+    const aiKingAlive = units.some((u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated);
 
     return {
       playerTiles,
@@ -439,8 +439,8 @@ export default function App() {
       aiInfluencePct: Math.round((aiTiles / totalTiles) * 100),
       playerDefeats,
       aiDefeats,
-      playerSovereignAlive,
-      aiSovereignAlive,
+      playerKingAlive,
+      aiKingAlive,
     };
   }, [tiles, units]);
 
