@@ -20,7 +20,8 @@ import {
   computeInfluenceMap,
   countInfluencedTiles,
 } from './utils/gameRules';
-import { chooseAIMove } from './utils/aiEngine';
+import { advanceTurn } from './utils/gameState';
+import type { AIRequest, AIResponse } from './utils/aiWorker';
 import { soundEffects } from './utils/soundEffects';
 import { generateGameLogText, downloadGameLog } from './utils/gameExporter';
 import { HexBoard } from './components/HexBoard';
@@ -69,14 +70,17 @@ export default function App() {
   const [showAuras, setShowAuras] = useState<boolean>(false);
   const [showLastMove, setShowLastMove] = useState<boolean>(true);
 
-  // Difficulty is permanently set to Grandmaster
-  const difficulty = 'grandmaster';
+  // AI search budget per move, and a minimum delay so instant replies don't feel abrupt
+  const AI_TIME_LIMIT_MS = 1200;
+  const AI_MIN_THINK_MS = 300;
 
   // State refs to ensure AI effect reads latest state without cancelling timers
   const tilesRef = React.useRef(tiles);
   tilesRef.current = tiles;
   const unitsRef = React.useRef(units);
   unitsRef.current = units;
+  const roundNumberRef = React.useRef(roundNumber);
+  roundNumberRef.current = roundNumber;
 
   // Initialize a fresh game
   const initGame = useCallback(() => {
@@ -127,63 +131,12 @@ export default function App() {
       updatedTiles: Map<string, HexTile>,
       updatedUnits: Unit[]
     ) => {
-      const otherTeam: Team = currentMover === 'player' ? 'ai' : 'player';
-
-      let otherHasMoves = hasAnyLegalMoves(otherTeam, updatedTiles, updatedUnits);
-      let currentHasMoves = hasAnyLegalMoves(currentMover, updatedTiles, updatedUnits);
-
-      let effectiveUnits = updatedUnits;
-
-      // 1. If other team has unmoved units but 0 legal moves, they automatically skip!
-      const otherUnmoved = updatedUnits.filter(
-        (u) => u.team === otherTeam && !u.isDefeated && !u.hasMovedThisRound
-      );
-      if (otherUnmoved.length > 0 && !otherHasMoves) {
-        effectiveUnits = effectiveUnits.map((u) =>
-          u.team === otherTeam && !u.isDefeated && !u.hasMovedThisRound
-            ? { ...u, hasMovedThisRound: true }
-            : u
-        );
-        setUnits(effectiveUnits);
-      }
-
-      // 2. If current team has unmoved units but 0 legal moves, they also automatically skip!
-      const currentUnmoved = effectiveUnits.filter(
-        (u) => u.team === currentMover && !u.isDefeated && !u.hasMovedThisRound
-      );
-      if (currentUnmoved.length > 0 && !currentHasMoves) {
-        effectiveUnits = effectiveUnits.map((u) =>
-          u.team === currentMover && !u.isDefeated && !u.hasMovedThisRound
-            ? { ...u, hasMovedThisRound: true }
-            : u
-        );
-        setUnits(effectiveUnits);
-      }
-
-      // Re-evaluate legal moves with effectiveUnits
-      otherHasMoves = hasAnyLegalMoves(otherTeam, updatedTiles, effectiveUnits);
-      currentHasMoves = hasAnyLegalMoves(currentMover, updatedTiles, effectiveUnits);
-
-      if (otherHasMoves) {
-        setCurrentTurn(otherTeam);
-      } else if (currentHasMoves) {
-        setCurrentTurn(currentMover);
-      } else {
-        // Both sides finished their moves (or skipped): start new round!
-        const nextRoundFirstMover: Team = currentMover === 'player' ? 'ai' : 'player';
-
+      const next = advanceTurn(updatedUnits, currentMover, updatedTiles);
+      setUnits(next.units);
+      setCurrentTurn(next.currentTurn);
+      if (next.newRound) {
         setRoundNumber((r) => r + 1);
         soundEffects.playRoundChange();
-
-        // Reset hasMovedThisRound for all alive units
-        setUnits((prevUnits) =>
-          prevUnits.map((u) => ({
-            ...u,
-            hasMovedThisRound: false,
-          }))
-        );
-
-        setCurrentTurn(nextRoundFirstMover);
       }
 
       // Increment turnTrigger to ensure any effect watching turns (like AI) always fires
@@ -385,38 +338,80 @@ export default function App() {
   const evaluateNextTurnRef = React.useRef(evaluateNextTurn);
   evaluateNextTurnRef.current = evaluateNextTurn;
 
-  // AI Turn Execution Loop - Fast (<250ms) using Grandmaster heuristic engine
+  const skipUnitTurnRef = React.useRef(skipUnitTurn);
+  skipUnitTurnRef.current = skipUnitTurn;
+
+  // Search-based AI runs in a Web Worker so the UI stays responsive while it thinks
+  const aiWorkerRef = React.useRef<Worker | null>(null);
+  const aiRequestIdRef = React.useRef(0);
   useEffect(() => {
-    if (currentTurn !== 'ai' || winner) {
+    const worker = new Worker(new URL('./utils/aiWorker.ts', import.meta.url), { type: 'module' });
+    aiWorkerRef.current = worker;
+    return () => worker.terminate();
+  }, []);
+
+  // AI Turn Execution Loop
+  useEffect(() => {
+    const worker = aiWorkerRef.current;
+    if (currentTurn !== 'ai' || winner || !worker) {
       setIsAiThinking(false);
       return;
     }
 
     setIsAiThinking(true);
+    const requestId = ++aiRequestIdRef.current;
+    const startedAt = performance.now();
+    let applyTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const timer = setTimeout(() => {
-      const currentTiles = tilesRef.current;
-      const currentUnits = unitsRef.current;
+    const onMessage = (e: MessageEvent<AIResponse>) => {
+      if (e.data.requestId !== requestId) return; // stale reply (new game or turn changed)
+      const { result } = e.data;
+      const delay = Math.max(0, AI_MIN_THINK_MS - (performance.now() - startedAt));
 
-      const choice = chooseAIMove(currentTiles, currentUnits, difficulty);
+      applyTimer = setTimeout(() => {
+        const currentUnits = unitsRef.current;
+        const action = result?.action;
+        const actingUnit =
+          action && action.kind !== 'pass'
+            ? currentUnits.find((u) => u.id === action.unitId)
+            : undefined;
 
-      if (choice) {
-        executeMoveRef.current(choice.unit, choice.move);
-      } else {
-        // AI has no legal moves for any remaining units: skip their turn (stay where they are)
-        const updatedAiUnits = currentUnits.map((u) =>
-          u.team === 'ai' && !u.isDefeated && !u.hasMovedThisRound
-            ? { ...u, hasMovedThisRound: true }
-            : u
-        );
-        setUnits(updatedAiUnits);
-        evaluateNextTurnRef.current('ai', currentTiles, updatedAiUnits);
-      }
+        if (action?.kind === 'move' && actingUnit) {
+          executeMoveRef.current(actingUnit, action.move);
+        } else if (action?.kind === 'skip' && actingUnit) {
+          skipUnitTurnRef.current(actingUnit);
+        } else {
+          // No AI unit can move: all remaining AI units hold position
+          const updatedAiUnits = currentUnits.map((u) =>
+            u.team === 'ai' && !u.isDefeated && !u.hasMovedThisRound
+              ? { ...u, hasMovedThisRound: true }
+              : u
+          );
+          setUnits(updatedAiUnits);
+          evaluateNextTurnRef.current('ai', tilesRef.current, updatedAiUnits);
+        }
+        setIsAiThinking(false);
+      }, delay);
+    };
 
-      setIsAiThinking(false);
-    }, 240);
+    worker.addEventListener('message', onMessage);
+    const request: AIRequest = {
+      requestId,
+      state: {
+        units: unitsRef.current,
+        currentTurn: 'ai',
+        roundNumber: roundNumberRef.current,
+        winner: null,
+      },
+      tiles: tilesRef.current,
+      options: { timeLimitMs: AI_TIME_LIMIT_MS },
+    };
+    worker.postMessage(request);
 
-    return () => clearTimeout(timer);
+    return () => {
+      worker.removeEventListener('message', onMessage);
+      clearTimeout(applyTimer);
+    };
   }, [currentTurn, winner, turnTrigger]);
 
   // Statistics & Score tracking

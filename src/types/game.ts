@@ -97,12 +97,3 @@ export interface MoveRecord {
   isWinningMove?: boolean;
   timestamp: number;
 }
-
-export type AIDifficulty = 'apprentice' | 'tactician' | 'grandmaster';
-
-export interface GameSettings {
-  difficulty: AIDifficulty;
-  soundEnabled: boolean;
-  showAuras: boolean;
-  showCoordinates: boolean;
-}

@@ -1,272 +1,284 @@
-import {
-  HexTile,
-  Unit,
-  LegalMove,
-  UnitRank,
-  AIDifficulty,
-} from '../types/game';
-import {
-  calculateLegalMovesForUnit,
-  computeInfluenceMap,
-  countInfluencedTiles,
-  calculateDefensiveRank,
-  calculateAttackRank,
-  getUnitAuraRank,
-  getUnitSpeed,
-  applyMove,
-} from './gameRules';
-import { hexDistance } from './hexMath';
-
-export interface AIMoveChoice {
-  unit: Unit;
-  move: LegalMove;
-  score: number;
-  explanation: string;
-}
-
-const RANK_VALUES: Record<UnitRank, number> = {
-  4: 100000, // King (Game loss if lost)
-  3: 4500,   // General
-  2: 2200,   // Captain
-  1: 1000,   // Scout
-};
+import { HexTile, Unit, UnitRank } from '../types/game';
+import { calculateAttackRank, calculateDefensiveRank, getUnitSpeed } from './gameRules';
+import { coordKey, getHexNeighbors, hexDistance } from './hexMath';
+import { GameAction, GameState, applyAction, getActions } from './gameState';
 
 /**
- * Finds the best tactical move for the AI using Grandmaster heuristics:
- * - Master-level combined rank combat calculations (defensive support + flanking attack rank)
- * - Active escort clustering around AI King to maximize its defensive rank
- * - Full awareness of player combined attack reach and round boundary resets
- * - Flanking opportunities to gang up on high-value player pieces
+ * Search-based opponent.
+ *
+ * Alpha-beta minimax over single-unit actions with iterative deepening under a
+ * time budget. Turns do not strictly alternate in this game (a side keeps
+ * moving once the opponent has moved all its units), so every node simply
+ * maximizes or minimizes depending on whose turn it is in that state.
+ *
+ * - Leaves are resolved with a capture-only quiescence search so the horizon
+ *   never falls in the middle of an exchange.
+ * - Below the root only the most promising quiet moves are searched (all
+ *   captures always are), which buys extra depth.
+ * - The evaluation is generic: material, tiles under influence and the safety
+ *   margin of each King.
  */
-export function chooseAIMove(
-  tiles: Map<string, HexTile>,
-  units: Unit[],
-  difficulty: AIDifficulty = 'grandmaster'
-): AIMoveChoice | null {
-  // Get all active AI units that haven't moved yet this round
-  const candidateUnits = units.filter(
-    (u) => u.team === 'ai' && !u.isDefeated && !u.hasMovedThisRound
-  );
 
-  if (candidateUnits.length === 0) {
-    return null;
-  }
-
-  const playerUnits = units.filter((u) => u.team === 'player' && !u.isDefeated);
-  const friendlyUnits = units.filter((u) => u.team === 'ai' && !u.isDefeated);
-
-  const aiKing = units.find(
-    (u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated
-  );
-  const playerKing = units.find(
-    (u) => u.team === 'player' && u.rank === 4 && !u.isDefeated
-  );
-
-  const playerUnmovedUnits = playerUnits.filter((u) => !u.hasMovedThisRound);
-  const isLastMoveOfRound =
-    candidateUnits.length === 1 && playerUnmovedUnits.length === 0;
-
-  const allPossibleMoves: AIMoveChoice[] = [];
-
-  for (const unit of candidateUnits) {
-    const legalMoves = calculateLegalMovesForUnit(unit, tiles, units);
-
-    for (const move of legalMoves) {
-      const evaluation = evaluateGrandmasterMove(
-        unit,
-        move,
-        tiles,
-        units,
-        playerUnits,
-        friendlyUnits,
-        aiKing,
-        playerKing,
-        candidateUnits.length,
-        isLastMoveOfRound
-      );
-
-      allPossibleMoves.push({
-        unit,
-        move,
-        score: evaluation.score,
-        explanation: evaluation.explanation,
-      });
-    }
-  }
-
-  if (allPossibleMoves.length === 0) {
-    return null;
-  }
-
-  // Sort from highest score to lowest
-  allPossibleMoves.sort((a, b) => b.score - a.score);
-
-  return allPossibleMoves[0];
+export interface SearchOptions {
+  timeLimitMs?: number;
+  maxDepth?: number;
 }
 
-function evaluateGrandmasterMove(
-  unit: Unit,
-  move: LegalMove,
+export interface SearchResult {
+  action: GameAction;
+  score: number;
+  depth: number; // deepest fully or partially searched horizon (in single-unit actions)
+  nodes: number;
+  timeMs: number;
+}
+
+const WIN_SCORE = 1_000_000;
+const PIECE_VALUE: Record<UnitRank, number> = { 1: 100, 2: 180, 3: 260, 4: 0 }; // King loss is terminal
+const TILE_CONTROL_VALUE = 12;
+const KING_SAFETY_VALUE = 20;
+const KING_SAFETY_CAP = 6;
+const MAX_QUIESCENCE_DEPTH = 4;
+const INNER_BEAM_WIDTH = 10;
+
+const DEFAULT_TIME_LIMIT_MS = 1200;
+const DEFAULT_MAX_DEPTH = 8;
+
+class SearchTimeout extends Error {}
+
+// Precomputed tile indices: area[i] = tile i plus its on-board neighbours
+interface BoardIndex {
+  index: Map<string, number>;
+  area: number[][];
+  size: number;
+}
+
+function buildBoardIndex(tiles: Map<string, HexTile>): BoardIndex {
+  const index = new Map<string, number>();
+  for (const key of tiles.keys()) index.set(key, index.size);
+  const area: number[][] = [];
+  for (const tile of tiles.values()) {
+    const cells = [index.get(tile.id)!];
+    for (const n of getHexNeighbors(tile)) {
+      const j = index.get(coordKey(n));
+      if (j !== undefined) cells.push(j);
+    }
+    area.push(cells);
+  }
+  return { index, area, size: index.size };
+}
+
+export function chooseAIAction(
+  state: GameState,
   tiles: Map<string, HexTile>,
-  units: Unit[],
-  playerUnits: Unit[],
-  friendlyUnits: Unit[],
-  aiKing: Unit | undefined,
-  playerKing: Unit | undefined,
-  aiCandidateCount: number,
-  isLastMoveOfRound: boolean
-): { score: number; explanation: string } {
-  let score = 0;
-  let explanation = 'Tactical positioning';
+  options: SearchOptions = {}
+): SearchResult | null {
+  const started = performance.now();
+  const deadline = started + (options.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS);
+  const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const me = state.currentTurn;
+  const board = buildBoardIndex(tiles);
+  let nodes = 0;
 
-  // 1. INSTANT WIN: Assassinate Player King (Rank 4)
-  if (move.isAttack && move.targetUnitRank === 4) {
-    return {
-      score: 1000000,
-      explanation: 'Strike down player King to win the war!',
-    };
+  const rootActions = getActions(state, tiles);
+  if (rootActions.length === 0) return null;
+  if (rootActions.length === 1) {
+    return { action: rootActions[0], score: 0, depth: 0, nodes: 0, timeMs: 0 };
   }
 
-  // 2. SIMULATE BOARD AFTER THIS MOVE
-  const { newUnits: simUnits } = applyMove(unit.id, move, units);
+  // ---------- Evaluation (from `me`'s point of view) ----------
 
-  const simAiKing = simUnits.find(
-    (u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated
-  );
-  const simPlayerKing = simUnits.find(
-    (u) => u.team === 'player' && u.rank === 4 && !u.isDefeated
-  );
-
-  if (!simAiKing) {
-    return { score: -2000000, explanation: 'Fatal blunder: loses King' };
-  }
-
-  // 3. COMBINED RANK DEFENSE CHECK FOR AI KING
-  // Calculate AI King's defensive rank on the simulated board (4 + friendly neighbors)
-  const aiKingDefRank = calculateDefensiveRank(simAiKing, simUnits);
-
-  // Check if any Player unit can reach and defeat AI King
-  // Under the new rule, an attack succeeds if playerAttackRank > aiKingDefRank
-  for (const pu of playerUnits) {
-    const testPlayerUnit: Unit = {
-      ...pu,
-      hasMovedThisRound: false, // test with full movement capacity
-    };
-
-    const playerMoves = calculateLegalMovesForUnit(
-      testPlayerUnit,
-      tiles,
-      simUnits
-    );
-
-    const fatalMove = playerMoves.find(
-      (m) => m.isAttack && m.targetUnitId === simAiKing.id
-    );
-
-    if (fatalMove) {
-      return {
-        score: -2000000,
-        explanation: 'FATAL: Leaves AI King vulnerable to combined-rank assassination!',
-      };
-    }
-  }
-
-  // If Player King is near, check proximity
-  if (simPlayerKing) {
-    const distToPlayerKing = hexDistance(
-      simAiKing.coord,
-      simPlayerKing.coord
-    );
-    if (distToPlayerKing <= 4 && aiKingDefRank <= 4) {
-      score -= 100000; // Dangerously isolated near player frontline
-    }
-  }
-
-  // 4. KING DISCIPLINE & FORMATION (RANK 4)
-  if (unit.rank === 4) {
-    // Highly reward staying surrounded by bodyguards (each guard adds to defensive rank!)
-    score += (aiKingDefRank - 4) * 4000;
-
-    // Discourage reckless overextension into the player's half if undefended
-    if (aiKingDefRank <= 4 && move.target.r >= 0) {
-      score -= 50000;
-    }
-  }
-
-  // 5. BODYGUARD & COMBINED RANK FORMATIONS (FOR GENERALS & CAPTAINS)
-  // Moving friendly units adjacent to the AI King directly adds to its Defensive Rank!
-  if (unit.rank !== 4 && simAiKing) {
-    const distToKing = hexDistance(move.target, simAiKing.coord);
-    if (distToKing === 1) {
-      // Each adjacent ally adds its rank to the King's defensive rank
-      const defRankBoost = getUnitAuraRank(unit.rank);
-      score += defRankBoost * 3000;
-      explanation = `Bolster King defensive rank (+${defRankBoost} DEF)`;
-    }
-
-    // If unit was already adjacent to King and moves away, penalize decreasing King DEF
-    const prevDistToKing = hexDistance(unit.coord, simAiKing.coord);
-    if (prevDistToKing === 1 && distToKing > 1) {
-      score -= getUnitAuraRank(unit.rank) * 3500; // Stripping defense from King!
-    }
-  }
-
-  // 6. COMBINED RANK CAPTURES (ATTACKING)
-  if (move.isAttack && move.targetUnitRank) {
-    const victimValue = RANK_VALUES[move.targetUnitRank];
-    const attackOverkill = (move.attackRank ?? 1) - (move.defenseRank ?? 1);
-    score += victimValue * 2.5 + attackOverkill * 200;
-    explanation = `Combined attack on player ${getRankName(move.targetUnitRank)} (ATK ${move.attackRank} vs DEF ${move.defenseRank})`;
-  }
-
-  // 7. RETALIATION CHECK ON MOVING UNIT
-  // Check if player units can capture this unit at its target position
-  const simMovingUnit = simUnits.find((u) => u.id === unit.id);
-  if (simMovingUnit) {
-    const myDefRank = calculateDefensiveRank(simMovingUnit, simUnits);
-    for (const pu of playerUnits) {
-      const dist = hexDistance(pu.coord, move.target);
-      const puSpeed = getUnitSpeed(pu.rank);
-      if (dist <= puSpeed) {
-        // Can this player unit and its allies overpower myDefRank?
-        const playerAtkRank = calculateAttackRank(pu, move.target, simUnits);
-        if (playerAtkRank > myDefRank) {
-          const penalty = RANK_VALUES[unit.rank] * 1.6;
-          score -= penalty;
-          break;
-        }
+  const kingSafety = (king: Unit | undefined, units: Unit[]): number => {
+    if (!king) return -KING_SAFETY_CAP;
+    const defense = calculateDefensiveRank(king, units);
+    let strongestAttack = 0;
+    for (const u of units) {
+      if (u.isDefeated || u.team === king.team) continue;
+      if (hexDistance(u.coord, king.coord) <= getUnitSpeed(u.rank)) {
+        strongestAttack = Math.max(strongestAttack, calculateAttackRank(u, king.coord, units));
       }
     }
-  }
+    return Math.max(-KING_SAFETY_CAP, Math.min(KING_SAFETY_CAP, defense - strongestAttack));
+  };
 
-  // 8. FLANKING SUPPORT / GANGING UP
-  // If moving adjacent to an enemy unit, we provide flanking support for future attacks!
-  for (const pu of playerUnits) {
-    if (hexDistance(move.target, pu.coord) === 1) {
-      score += 400 * unit.rank; // Flanking pressure
+  const evaluate = (s: GameState, ply: number): number => {
+    if (s.winner) return s.winner === me ? WIN_SCORE - ply : -WIN_SCORE + ply;
+
+    const influence = new Float64Array(board.size);
+    let score = 0;
+    let myKing: Unit | undefined;
+    let theirKing: Unit | undefined;
+
+    for (const u of s.units) {
+      if (u.isDefeated) continue;
+      const side = u.team === me ? 1 : -1;
+      score += side * PIECE_VALUE[u.rank];
+      for (const j of board.area[board.index.get(coordKey(u.coord))!]) {
+        influence[j] += side * u.rank;
+      }
+      if (u.rank === 4) {
+        if (u.team === me) myKing = u;
+        else theirKing = u;
+      }
     }
+
+    for (const v of influence) {
+      if (v > 0) score += TILE_CONTROL_VALUE;
+      else if (v < 0) score -= TILE_CONTROL_VALUE;
+    }
+
+    score += KING_SAFETY_VALUE * (kingSafety(myKing, s.units) - kingSafety(theirKing, s.units));
+    return score;
+  };
+
+  // ---------- Move ordering ----------
+
+  // Cheap ordering key: captures first (most valuable victim), then quiet moves
+  // by the local change in tiles controlled by the mover.
+  const orderActions = (s: GameState, actions: GameAction[]): { action: GameAction; key: number }[] => {
+    const moverSign = s.currentTurn === 'player' ? 1 : -1;
+    const influence = new Float64Array(board.size);
+    const unitById = new Map<string, Unit>();
+    for (const u of s.units) {
+      if (u.isDefeated) continue;
+      unitById.set(u.id, u);
+      const sign = u.team === 'player' ? 1 : -1;
+      for (const j of board.area[board.index.get(coordKey(u.coord))!]) influence[j] += sign * u.rank;
+    }
+
+    return actions
+      .map((action) => {
+        if (action.kind !== 'move') return { action, key: -1e6 };
+        const { move } = action;
+        const unit = unitById.get(action.unitId)!;
+        if (move.isAttack) {
+          const victimValue = move.targetUnitRank === 4 ? 1e5 : PIECE_VALUE[move.targetUnitRank!];
+          return { action, key: 1e6 + victimValue - unit.rank };
+        }
+        const from = board.area[board.index.get(coordKey(unit.coord))!];
+        const to = board.area[board.index.get(coordKey(move.target))!];
+        const change = new Map<number, number>();
+        for (const j of from) change.set(j, (change.get(j) ?? 0) - moverSign * unit.rank);
+        for (const j of to) change.set(j, (change.get(j) ?? 0) + moverSign * unit.rank);
+        let delta = 0;
+        for (const [j, d] of change) {
+          delta += Math.sign((influence[j] + d) * moverSign) - Math.sign(influence[j] * moverSign);
+        }
+        return { action, key: delta };
+      })
+      .sort((a, b) => b.key - a.key);
+  };
+
+  // ---------- Search ----------
+
+  const tick = () => {
+    nodes++;
+    if ((nodes & 127) === 0 && performance.now() > deadline) throw new SearchTimeout();
+  };
+
+  const quiesce = (s: GameState, alpha: number, beta: number, ply: number, qDepth: number): number => {
+    tick();
+    const standPat = evaluate(s, ply);
+    if (s.winner || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
+
+    const maximizing = s.currentTurn === me;
+    if (maximizing) {
+      if (standPat >= beta) return standPat;
+      alpha = Math.max(alpha, standPat);
+    } else {
+      if (standPat <= alpha) return standPat;
+      beta = Math.min(beta, standPat);
+    }
+
+    const captures = orderActions(
+      s,
+      getActions(s, tiles).filter((a) => a.kind === 'move' && a.move.isAttack)
+    );
+    let best = standPat;
+    for (const { action } of captures) {
+      const v = quiesce(applyAction(s, tiles, action), alpha, beta, ply + 1, qDepth + 1);
+      if (maximizing) {
+        best = Math.max(best, v);
+        alpha = Math.max(alpha, v);
+      } else {
+        best = Math.min(best, v);
+        beta = Math.min(beta, v);
+      }
+      if (alpha >= beta) break;
+    }
+    return best;
+  };
+
+  const search = (s: GameState, depth: number, alpha: number, beta: number, ply: number): number => {
+    if (s.winner) return evaluate(s, ply);
+    if (depth <= 0) return quiesce(s, alpha, beta, ply, 0);
+    tick();
+
+    let ordered = orderActions(s, getActions(s, tiles));
+    if (ordered.length > INNER_BEAM_WIDTH) {
+      const captures = ordered.filter((o) => o.action.kind === 'move' && o.action.move.isAttack);
+      const quiet = ordered.filter((o) => !(o.action.kind === 'move' && o.action.move.isAttack));
+      ordered = [...captures, ...quiet.slice(0, Math.max(0, INNER_BEAM_WIDTH - captures.length))];
+    }
+
+    const maximizing = s.currentTurn === me;
+    let best = maximizing ? -Infinity : Infinity;
+    for (const { action } of ordered) {
+      const v = search(applyAction(s, tiles, action), depth - 1, alpha, beta, ply + 1);
+      if (maximizing) {
+        best = Math.max(best, v);
+        alpha = Math.max(alpha, v);
+      } else {
+        best = Math.min(best, v);
+        beta = Math.min(beta, v);
+      }
+      if (alpha >= beta) break;
+    }
+    return best;
+  };
+
+  // ---------- Iterative deepening at the root ----------
+
+  let root = orderActions(state, rootActions).map((o) => ({ action: o.action, score: -Infinity }));
+  let bestAction = root[0].action;
+  let bestScore = -Infinity;
+  let reachedDepth = 0;
+
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    let alpha = -Infinity;
+    let iterationBest: { action: GameAction; score: number } | null = null;
+    try {
+      for (const entry of root) {
+        entry.score = search(applyAction(state, tiles, entry.action), depth - 1, alpha, Infinity, 1);
+        if (!iterationBest || entry.score > iterationBest.score) {
+          iterationBest = { action: entry.action, score: entry.score };
+        }
+        alpha = Math.max(alpha, entry.score);
+      }
+    } catch (e) {
+      if (!(e instanceof SearchTimeout)) throw e;
+      // A partially searched iteration is still usable: the previous best move is
+      // searched first, and any move that beat it has an exact score.
+      if (iterationBest) {
+        bestAction = iterationBest.action;
+        bestScore = iterationBest.score;
+        reachedDepth = depth;
+      }
+      break;
+    }
+
+    bestAction = iterationBest!.action;
+    bestScore = iterationBest!.score;
+    reachedDepth = depth;
+    root = [...root].sort((a, b) => b.score - a.score);
+
+    if (Math.abs(bestScore) > WIN_SCORE / 2) break; // forced result found
   }
 
-  // 9. SCOUT (L1) FRONTLINE EXPANSION
-  if (unit.rank === 1) {
-    score += move.target.r * 60;
-  }
-
-  // 10. INFLUENCE CONTROL
-  // Reward moves that increase the number of tiles under net AI influence
-  const before = countInfluencedTiles(computeInfluenceMap(tiles, units));
-  const after = countInfluencedTiles(computeInfluenceMap(tiles, simUnits));
-  const influenceGain = (after.ai - after.player) - (before.ai - before.player);
-  score += influenceGain * 150;
-
-  return { score, explanation };
-}
-
-function getRankName(rank: UnitRank): string {
-  switch (rank) {
-    case 4: return 'King';
-    case 3: return 'General';
-    case 2: return 'Captain';
-    case 1: return 'Scout';
-  }
+  return {
+    action: bestAction,
+    score: bestScore,
+    depth: reachedDepth,
+    nodes,
+    timeMs: Math.round(performance.now() - started),
+  };
 }
