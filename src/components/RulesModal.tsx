@@ -76,9 +76,11 @@ const GambitRules: React.FC = () => (
         <li className="flex items-start gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
           <span>
-            <strong>Scouts:</strong> the arrow points at the edge the Scout faces. With 3 points per move, a step
-            forward costs 1 point and a 60° turn costs 2, so a Scout can advance up to 3 tiles, turn once and
-            step once (in either order), or just turn in place. When a tile can be reached with different facings, choose the final facing from the arrows shown.
+            <strong>Scouts</strong> work like chess pawns. The arrow points at the edge the Scout faces. A move is
+            exactly one of: advance 1 or 2 hexes straight ahead (never capturing; any piece blocks), turn 60° left or
+            right in place, or turn 60° left or right and capture an enemy on the adjacent hex in the new facing. So a
+            Scout attacks the two hexes diagonally in front of it. When a tile allows several facings, choose one from
+            the arrows shown.
           </span>
         </li>
       </ul>

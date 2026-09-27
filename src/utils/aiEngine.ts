@@ -46,7 +46,7 @@ export interface SearchResult {
 const WIN_SCORE = 1_000_000;
 const PIECE_VALUE: Record<UnitRank, number> = { 1: 100, 2: 180, 3: 260, 4: 0 }; // King loss is terminal
 // Gambit: Scout, Bishop, Rook (the King is never captured: checkmate is terminal)
-const GAMBIT_PIECE_VALUE: Record<UnitRank, number> = { 1: 150, 2: 380, 3: 420, 4: 0 };
+const GAMBIT_PIECE_VALUE: Record<UnitRank, number> = { 1: 100, 2: 380, 3: 420, 4: 0 };
 const GAMBIT_MOBILITY_VALUE = 5; // per open tile on a Rook/Bishop line
 const GAMBIT_SCOUT_ADVANCE_VALUE = 6; // per row advanced toward the enemy
 const GAMBIT_KING_SHELTER_VALUE = 12; // per friendly piece next to the King

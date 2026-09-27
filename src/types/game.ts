@@ -83,7 +83,8 @@ export const GAMBIT_PIECES: Record<UnitRank, GambitPieceDefinition> = {
   },
   1: {
     name: 'Scout',
-    description: 'Faces one edge. 3 points per move: a step forward costs 1, a 60° turn costs 2. Captures by stepping forward.',
+    description:
+      'Pawn-like, faces one edge. Advances 1 or 2 hexes straight ahead (no capture), turns 60° in place, or turns 60° and captures on the adjacent hex.',
   },
 };
 

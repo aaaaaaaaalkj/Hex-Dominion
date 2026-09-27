@@ -9,14 +9,13 @@ import { HEX_DIRECTIONS, coordKey, hexDistance } from './hexMath';
  *   blocked when both hexes beside that corner are occupied
  * - Bishop: slides any distance through the 4 non-horizontal edges (NE, NW, SW, SE)
  * Pieces capture along every line they move on.
- * - Scout: faces an edge; 3 points per move, a step forward costs 1, a 60° turn costs 2;
- *   captures by stepping forward onto an enemy (ends the move)
+ * - Scout (pawn-like): faces an edge. A move is one of: advance 1 or 2 hexes straight
+ *   ahead (no capture), turn 60° left or right in place, or turn 60° and capture an
+ *   enemy on the adjacent hex in the new facing
  * Nothing jumps. A move may not leave the mover's own King in check.
  */
 
-export const SCOUT_MOVE_POINTS = 3;
-export const SCOUT_STEP_COST = 1;
-export const SCOUT_TURN_COST = 2;
+export const SCOUT_MAX_ADVANCE = 2;
 
 type Occupancy = Map<string, Unit>;
 
@@ -109,72 +108,48 @@ function slidingMoves(
   return moves;
 }
 
+// Facings a Scout can turn to (60° left or right); it captures on the adjacent hex in those directions
+function scoutTurns(facing: number): number[] {
+  return [(facing + 1) % 6, (facing + 5) % 6];
+}
+
 /**
- * Scout moves: explores (position, facing) states spending up to SCOUT_MOVE_POINTS.
- * Every reachable state other than the start is a move (turning in place included).
+ * Scout moves: advance 1-2 hexes (no capture), turn in place, or turn and capture.
  */
 function scoutMoves(unit: Unit, tiles: Map<string, HexTile>, occupancy: Occupancy): LegalMove[] {
-  const startFacing = unit.facing ?? 0;
-  type ScoutState = { coord: HexCoord; facing: number; path: HexCoord[]; cost: number };
-  const stateKey = (c: HexCoord, f: number) => `${c.q},${c.r},${f}`;
+  const facing = unit.facing ?? 0;
+  const moves: LegalMove[] = [];
 
-  // Cheapest way to reach each (position, facing); explored in order of points spent
-  const best = new Map<string, ScoutState>();
-  const buckets: ScoutState[][] = Array.from({ length: SCOUT_MOVE_POINTS + 1 }, () => []);
-  const start: ScoutState = { coord: unit.coord, facing: startFacing, path: [], cost: 0 };
-  best.set(stateKey(unit.coord, startFacing), start);
-  buckets[0].push(start);
+  // Advance straight ahead onto empty hexes only
+  let coord = unit.coord;
+  const path: HexCoord[] = [];
+  for (let step = 0; step < SCOUT_MAX_ADVANCE; step++) {
+    coord = add(coord, HEX_DIRECTIONS[facing]);
+    const key = coordKey(coord);
+    if (!tiles.has(key) || occupancy.has(key)) break;
+    path.push(coord);
+    moves.push({ target: coord, path: [...path], isAttack: false, facing });
+  }
 
-  const reach = (state: ScoutState) => {
-    if (state.cost > SCOUT_MOVE_POINTS) return;
-    const key = stateKey(state.coord, state.facing);
-    const known = best.get(key);
-    if (known && known.cost <= state.cost) return;
-    best.set(key, state);
-    buckets[state.cost].push(state);
-  };
+  for (const turned of scoutTurns(facing)) {
+    // Turn in place
+    moves.push({ target: unit.coord, path: [], isAttack: false, facing: turned });
 
-  const captures = new Map<string, LegalMove>();
-  for (let points = 0; points <= SCOUT_MOVE_POINTS; points++) {
-    for (const s of buckets[points]) {
-      if (best.get(stateKey(s.coord, s.facing)) !== s) continue; // superseded by a cheaper route
-
-      // Turn 60° left or right
-      for (const turn of [1, 5]) {
-        reach({ coord: s.coord, facing: (s.facing + turn) % 6, path: s.path, cost: points + SCOUT_TURN_COST });
-      }
-
-      // Step forward (captures an enemy in the way, which ends the move)
-      if (points + SCOUT_STEP_COST > SCOUT_MOVE_POINTS) continue;
-      const ahead = add(s.coord, HEX_DIRECTIONS[s.facing]);
-      const aheadKey = coordKey(ahead);
-      if (!tiles.has(aheadKey)) continue;
-      const occupant = occupancy.get(aheadKey);
-      if (occupant) {
-        const captureKey = stateKey(ahead, s.facing);
-        if (occupant.team !== unit.team && !captures.has(captureKey)) {
-          captures.set(captureKey, {
-            target: ahead,
-            path: [...s.path, ahead],
-            isAttack: true,
-            targetUnitId: occupant.id,
-            targetUnitRank: occupant.rank,
-            facing: s.facing,
-          });
-        }
-        continue;
-      }
-      reach({ coord: ahead, facing: s.facing, path: [...s.path, ahead], cost: points + SCOUT_STEP_COST });
+    // Turn and capture the adjacent enemy in the new facing
+    const target = add(unit.coord, HEX_DIRECTIONS[turned]);
+    const occupant = occupancy.get(coordKey(target));
+    if (occupant && occupant.team !== unit.team) {
+      moves.push({
+        target,
+        path: [target],
+        isAttack: true,
+        targetUnitId: occupant.id,
+        targetUnitRank: occupant.rank,
+        facing: turned,
+      });
     }
   }
-
-  // Every reached state except the start is a move (turning in place included)
-  const moves: LegalMove[] = [];
-  for (const state of best.values()) {
-    if (state === start) continue;
-    moves.push({ target: state.coord, path: state.path, isAttack: false, facing: state.facing });
-  }
-  return [...moves, ...captures.values()];
+  return moves;
 }
 
 function pseudoLegalMoves(unit: Unit, tiles: Map<string, HexTile>, occupancy: Occupancy): LegalMove[] {
@@ -215,12 +190,12 @@ export function isKingInCheck(team: Team, tiles: Map<string, HexTile>, units: Un
     }
   }
 
-  // Scouts within reach
+  // Scouts attack the adjacent hexes 60° left and right of their facing
   for (const u of units) {
-    if (u.isDefeated || u.team === team || u.rank !== 1) continue;
-    if (hexDistance(u.coord, king.coord) > SCOUT_MOVE_POINTS) continue;
-    if (scoutMoves(u, tiles, occupancy).some((m) => m.isAttack && m.targetUnitId === king.id)) {
-      return true;
+    if (u.isDefeated || u.team === team || u.rank !== 1 || hexDistance(u.coord, king.coord) !== 1) continue;
+    for (const turned of scoutTurns(u.facing ?? 0)) {
+      const attacked = add(u.coord, HEX_DIRECTIONS[turned]);
+      if (attacked.q === king.coord.q && attacked.r === king.coord.r) return true;
     }
   }
   return false;
