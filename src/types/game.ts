@@ -1,5 +1,19 @@
 export type Team = 'player' | 'ai';
 
+/**
+ * Game modes sharing the board and pieces:
+ * - dominion: rank-based combat, auras and influence, one move per unit per round
+ * - gambit: chess-like rules (no ranks), alternating turns, checkmate
+ */
+export type GameMode = 'dominion' | 'gambit';
+
+export const GAME_MODE_NAMES: Record<GameMode, string> = {
+  dominion: 'Dominion',
+  gambit: 'Gambit',
+};
+
+// Piece type key. In Dominion it is also the unit's rank; in Gambit it only
+// identifies the piece (4 King, 3 Rook, 2 Bishop, 1 Scout).
 export type UnitRank = 1 | 2 | 3 | 4;
 
 export interface UnitDefinition {
@@ -51,6 +65,25 @@ export const UNIT_DEFINITIONS: Record<UnitRank, UnitDefinition> = {
   },
 };
 
+export interface GambitPieceDefinition {
+  name: string;
+  description: string;
+}
+
+export const GAMBIT_PIECES: Record<UnitRank, GambitPieceDefinition> = {
+  4: { name: 'King', description: 'Moves 1 hex in any of the 6 directions. Checkmate it to win.' },
+  3: { name: 'Rook', description: 'Slides any distance across hex edges (6 directions).' },
+  2: { name: 'Bishop', description: 'Slides any distance through hex corners (6 directions), always staying on its tile color.' },
+  1: {
+    name: 'Scout',
+    description: 'Faces one edge. 4 points per move: a step forward or a 60° turn costs 1. Captures by stepping forward.',
+  },
+};
+
+export function getPieceName(mode: GameMode, rank: UnitRank): string {
+  return mode === 'gambit' ? GAMBIT_PIECES[rank].name : UNIT_DEFINITIONS[rank].name;
+}
+
 export interface HexCoord {
   q: number;
   r: number;
@@ -67,6 +100,7 @@ export interface Unit {
   coord: HexCoord;
   hasMovedThisRound: boolean;
   isDefeated?: boolean;
+  facing?: number; // Gambit Scouts: index into HEX_DIRECTIONS the piece points to
 }
 
 export interface LegalMove {
@@ -77,6 +111,7 @@ export interface LegalMove {
   targetUnitRank?: UnitRank;
   attackRank?: number;
   defenseRank?: number;
+  facing?: number; // Gambit Scouts: facing after the move
 }
 
 export interface MoveRecord {
@@ -95,5 +130,7 @@ export interface MoveRecord {
   attackRank?: number;
   defenseRank?: number;
   isWinningMove?: boolean;
+  facing?: number; // Gambit Scouts: facing after the move
+  isCheck?: boolean; // Gambit: the move gives check
   timestamp: number;
 }

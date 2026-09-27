@@ -1,5 +1,6 @@
-import React, { useMemo, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
+  GameMode,
   HexTile,
   Unit,
   LegalMove,
@@ -12,11 +13,14 @@ import {
   roundedHexPath,
   coordKey,
   areCoordsEqual,
+  directionAngle,
+  tileColorIndex,
 } from '../utils/hexMath';
 import {
   computeInfluenceMap,
   applyMove,
 } from '../utils/gameRules';
+import { isKingInCheck } from '../utils/gambitRules';
 import { SvgUnitPiece } from './SvgUnitPiece';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
@@ -28,7 +32,11 @@ const TEAM_RGB: Record<Team, string> = {
   ai: '225, 29, 72',
 };
 
+// Gambit board: three tile colors (like the two colors of a chess board)
+const GAMBIT_TILE_COLORS = ['#374357', '#2a3445', '#1d2533'];
+
 interface HexBoardProps {
+  mode?: GameMode;
   tiles: Map<string, HexTile>;
   units: Unit[];
   selectedUnit: Unit | null;
@@ -41,9 +49,11 @@ interface HexBoardProps {
   isFinalMove?: boolean; // whether lastMove is the game's final move
   onSelectUnit: (unit: Unit) => void;
   onExecuteMove: (move: LegalMove) => void;
+  onDeselect?: () => void;
 }
 
 export const HexBoard: React.FC<HexBoardProps> = ({
+  mode = 'dominion',
   tiles,
   units,
   selectedUnit,
@@ -56,9 +66,14 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   isFinalMove = true,
   onSelectUnit,
   onExecuteMove,
+  onDeselect,
 }) => {
+  const isGambit = mode === 'gambit';
   const hexRadius = 45; // Hex radius in pixels
   const [hoveredMove, setHoveredMove] = useState<LegalMove | null>(null);
+  // Gambit Scouts can reach a tile with different facings: pick one before moving
+  const [facingChoice, setFacingChoice] = useState<{ coord: HexCoord; moves: LegalMove[] } | null>(null);
+  useEffect(() => setFacingChoice(null), [selectedUnit, legalMoves]);
 
   // Zoom & Pan state
   const [zoom, setZoom] = useState<number>(1.0);
@@ -129,6 +144,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   // While a unit is selected its influence is lifted off the board; hovering a
   // target previews the board as if the move (including any capture) was made.
   const influenceMap = useMemo(() => {
+    if (isGambit) return new Map<string, number>(); // Gambit has no influence
     if (!selectedUnit) return computeInfluenceMap(tiles, units);
     if (hoveredMove) {
       return computeInfluenceMap(tiles, applyMove(selectedUnit.id, hoveredMove, units).newUnits);
@@ -137,16 +153,28 @@ export const HexBoard: React.FC<HexBoardProps> = ({
       tiles,
       units.filter((u) => u.id !== selectedUnit.id)
     );
-  }, [tiles, units, selectedUnit, hoveredMove]);
+  }, [isGambit, tiles, units, selectedUnit, hoveredMove]);
 
-  // Legal moves lookup map
-  const moveByTarget = useMemo(() => {
-    const map = new Map<string, LegalMove>();
+  // Legal moves grouped by target tile (several only for Gambit Scout facings)
+  const movesByTarget = useMemo(() => {
+    const map = new Map<string, LegalMove[]>();
     for (const m of legalMoves) {
-      map.set(coordKey(m.target), m);
+      const key = coordKey(m.target);
+      map.set(key, [...(map.get(key) ?? []), m]);
     }
     return map;
   }, [legalMoves]);
+
+  // Gambit: tiles of Kings currently in check
+  const checkedKingKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (!isGambit) return keys;
+    for (const team of ['player', 'ai'] as Team[]) {
+      const king = units.find((u) => u.team === team && u.rank === 4 && !u.isDefeated);
+      if (king && isKingInCheck(team, tiles, units)) keys.add(coordKey(king.coord));
+    }
+    return keys;
+  }, [isGambit, tiles, units]);
 
   // Compute SVG viewBox and exact center for symmetrical zooming
   const { viewBox, centerX, centerY } = useMemo(() => {
@@ -187,19 +215,26 @@ export const HexBoard: React.FC<HexBoardProps> = ({
 
     const key = coordKey(tile);
     const occupant = unitByCoord.get(key);
-    const legalMove = moveByTarget.get(key);
+    const moves = movesByTarget.get(key);
 
-    // If clicking a valid destination
-    if (legalMove) {
-      onExecuteMove(legalMove);
+    // If clicking a valid destination (with several facings: let the player pick one)
+    if (moves) {
+      if (moves.length === 1) {
+        onExecuteMove(moves[0]);
+      } else {
+        setFacingChoice({ coord: tile, moves });
+      }
       setHoveredMove(null);
       return;
     }
+    setFacingChoice(null);
 
     // If clicking own active unit
     if (occupant && occupant.team === 'player') {
       onSelectUnit(occupant);
       setHoveredMove(null);
+    } else {
+      onDeselect?.();
     }
   };
 
@@ -275,9 +310,10 @@ export const HexBoard: React.FC<HexBoardProps> = ({
             {Array.from(tiles.values()).map((tile) => {
               const { x, y } = hexToPixel(tile, hexRadius);
               const key = coordKey(tile);
-              const isTarget = moveByTarget.has(key);
-              const moveInfo = moveByTarget.get(key);
-              const isAttack = moveInfo?.isAttack;
+              const tileMoves = movesByTarget.get(key);
+              const isTarget = Boolean(tileMoves);
+              const moveInfo = tileMoves?.[0];
+              const isAttack = tileMoves?.some((m) => m.isAttack);
               const isSelectedTile = selectedUnit && coordKey(selectedUnit.coord) === key;
               const isHoveredTarget = hoveredMove !== null && coordKey(hoveredMove.target) === key;
 
@@ -293,7 +329,11 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               let influenceFill: string | null = null;
               let seamStroke = 'rgba(255, 255, 255, 0.04)';
 
-              if (influenceTeam) {
+              if (isGambit) {
+                fill = GAMBIT_TILE_COLORS[tileColorIndex(tile)];
+                stroke = '#0b1120';
+                seamStroke = 'rgba(255, 255, 255, 0.05)';
+              } else if (influenceTeam) {
                 const rgb = TEAM_RGB[influenceTeam];
                 influenceFill = `rgba(${rgb}, ${(0.12 + 0.7 * strength).toFixed(3)})`;
                 stroke = `rgba(${rgb}, ${(0.3 + 0.6 * strength).toFixed(3)})`;
@@ -309,6 +349,11 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               if (isHoveredTarget) {
                 stroke = 'rgba(255, 255, 255, 0.55)';
                 strokeWidth = 1.8;
+              }
+
+              if (checkedKingKeys.has(key)) {
+                stroke = '#ef4444';
+                strokeWidth = 2.8;
               }
 
               return (
@@ -382,7 +427,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               />
 
               {/* Combat Floating Capsule Badge */}
-              {hoveredMove.isAttack && (
+              {hoveredMove.isAttack && hoveredMove.attackRank !== undefined && (
 
                   <g
                     transform={`translate(${hexToPixel(hoveredMove.target, hexRadius).x}, ${hexToPixel(hoveredMove.target, hexRadius).y - 34})`}
@@ -515,7 +560,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               .filter((u) => !u.isDefeated)
               .map((unit) => {
                 const { x, y } = hexToPixel(unit.coord, hexRadius);
-                const moveInfo = moveByTarget.get(coordKey(unit.coord));
+                const moveInfo = movesByTarget.get(coordKey(unit.coord))?.[0];
                 const isAttackTarget = Boolean(moveInfo?.isAttack);
 
                 return (
@@ -531,6 +576,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                   >
                     <SvgUnitPiece
                       unit={unit}
+                      mode={mode}
                       cx={x}
                       cy={y}
                       isAttackTarget={isAttackTarget}
@@ -540,6 +586,37 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               })}
           </g>
 
+          {/* 5. GAMBIT SCOUT FACING PICKER: arrows toward each reachable facing */}
+          {facingChoice && (
+            <g id="facing-picker">
+              {facingChoice.moves.map((m) => {
+                const center = hexToPixel(facingChoice.coord, hexRadius);
+                const angle = directionAngle(m.facing ?? 0);
+                const rad = (angle * Math.PI) / 180;
+                const bx = center.x + Math.cos(rad) * 28;
+                const by = center.y + Math.sin(rad) * 28;
+                return (
+                  <g
+                    key={m.facing}
+                    data-facing={m.facing}
+                    transform={`translate(${bx}, ${by})`}
+                    className="cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFacingChoice(null);
+                      setHoveredMove(null);
+                      onExecuteMove(m);
+                    }}
+                    onMouseEnter={() => setHoveredMove(m)}
+                    onMouseLeave={() => setHoveredMove(null)}
+                  >
+                    <circle r="9" fill="#0f172a" stroke="rgba(255, 255, 255, 0.7)" strokeWidth="1.4" />
+                    <path d="M 0,-6 L 5,-0.5 L 1.8,-0.5 L 1.8,5.5 L -1.8,5.5 L -1.8,-0.5 L -5,-0.5 Z" fill="#e2e8f0" transform={`rotate(${angle + 90})`} />
+                  </g>
+                );
+              })}
+            </g>
+          )}
         </g>
       </svg>
     </div>

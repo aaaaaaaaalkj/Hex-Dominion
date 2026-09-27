@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Team, MoveRecord } from '../types/game';
+import { GameMode, Team, MoveRecord } from '../types/game';
+import { EndReason } from '../utils/gameState';
 import {
+  Handshake,
   Trophy,
   Skull,
   RotateCcw,
@@ -12,7 +14,9 @@ import {
 } from 'lucide-react';
 
 interface GameOverModalProps {
-  winner: Team;
+  mode: GameMode;
+  winner: Team | null; // null = draw
+  endReason: EndReason | null;
   roundNumber: number;
   totalMoves: number;
   playerInfluencePct: number;
@@ -27,7 +31,9 @@ interface GameOverModalProps {
 }
 
 export const GameOverModal: React.FC<GameOverModalProps> = ({
+  mode,
   winner,
+  endReason,
   roundNumber,
   totalMoves,
   playerInfluencePct,
@@ -41,6 +47,22 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   onCopyText,
 }) => {
   const isPlayerWinner = winner === 'player';
+  const isDraw = winner === null;
+  const isGambit = mode === 'gambit';
+
+  const title = isDraw ? 'Draw' : isPlayerWinner ? 'Glorious Victory' : 'Defeat in Battle';
+  const subtitle =
+    endReason === 'stalemate'
+      ? 'Stalemate: the side to move has no legal move but is not in check.'
+      : endReason === 'no-captures'
+      ? 'No piece was captured in 100 moves.'
+      : endReason === 'checkmate'
+      ? isPlayerWinner
+        ? 'Checkmate! The AI King has no escape.'
+        : 'Checkmate. Your King has no escape.'
+      : isPlayerWinner
+      ? 'You struck down the AI King and seized control of the battlefield!'
+      : 'Your King was struck down by the enemy.';
   const [copied, setCopied] = useState<boolean>(false);
 
   const handleCopy = async () => {
@@ -57,13 +79,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {/* Glow backdrop */}
         <div
           className={`absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 rounded-full blur-3xl opacity-20 pointer-events-none ${
-            isPlayerWinner ? 'bg-cyan-400' : 'bg-rose-500'
+            isDraw ? 'bg-slate-400' : isPlayerWinner ? 'bg-cyan-400' : 'bg-rose-500'
           }`}
         />
 
         {/* Victory/Defeat Icon */}
         <div className="mx-auto w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-xl">
-          {isPlayerWinner ? (
+          {isDraw ? (
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-slate-500 to-slate-300 flex items-center justify-center text-slate-950 shadow-lg">
+              <Handshake className="w-7 h-7" />
+            </div>
+          ) : isPlayerWinner ? (
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 shadow-amber-500/50 shadow-lg">
               <Trophy className="w-7 h-7" />
             </div>
@@ -77,13 +103,9 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {/* Title */}
         <div className="text-center mb-4">
           <h2 className="text-2xl font-bold font-display tracking-wide mb-1 text-white">
-            {isPlayerWinner ? 'Glorious Victory' : 'Defeat in Battle'}
+            {title}
           </h2>
-          <p className="text-xs text-slate-400">
-            {isPlayerWinner
-              ? 'You struck down the AI King and seized control of the battlefield!'
-              : 'Your King was struck down by the enemy.'}
-          </p>
+          <p className="text-xs text-slate-400">{subtitle}</p>
         </div>
 
         {/* Last Decisive Move Callout */}
@@ -92,7 +114,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             <div className="flex items-center justify-between text-[11px] font-semibold text-amber-400 mb-1">
               <span>DECISIVE FINAL MOVE</span>
               <span className="font-mono text-slate-400">
-                Move #{lastMove.turnNumber} · Round {lastMove.roundNumber}
+                Move #{lastMove.turnNumber} · {isGambit ? 'Move' : 'Round'} {lastMove.roundNumber}
               </span>
             </div>
             <p className="text-xs text-slate-200">
@@ -101,9 +123,10 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               </strong>{' '}
               {lastMove.isAttack ? (
                 <>
-                  struck down{' '}
+                  {isGambit ? 'captured' : 'struck down'}{' '}
                   <strong className={lastMove.team === 'player' ? 'text-rose-400' : 'text-cyan-400'}>
-                    {lastMove.capturedName} (L{lastMove.capturedRank})
+                    {lastMove.capturedName}
+                    {!isGambit && ` (L${lastMove.capturedRank})`}
                   </strong>{' '}
                   at{' '}
                   <span className="font-mono text-slate-400">
@@ -127,7 +150,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {/* Statistics Grid */}
         <div className="grid grid-cols-4 gap-2 mb-4 text-center">
           <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">Rounds</span>
+            <span className="text-[10px] text-slate-400 block">{isGambit ? 'Full Moves' : 'Rounds'}</span>
             <span className="text-base font-bold font-mono text-white tabular-nums">
               {roundNumber}
             </span>
@@ -139,13 +162,13 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             </span>
           </div>
           <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">Your Influence</span>
+            <span className="text-[10px] text-slate-400 block">{isGambit ? 'Pieces Lost' : 'Your Influence'}</span>
             <span className="text-base font-bold font-mono text-cyan-400 tabular-nums">
-              {playerInfluencePct}%
+              {isGambit ? playerDefeats : `${playerInfluencePct}%`}
             </span>
           </div>
           <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">Casualties</span>
+            <span className="text-[10px] text-slate-400 block">{isGambit ? 'Captured' : 'Casualties'}</span>
             <span className="text-base font-bold font-mono text-emerald-400 tabular-nums">
               {aiDefeats}
             </span>

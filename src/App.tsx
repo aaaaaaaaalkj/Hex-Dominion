@@ -5,6 +5,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
+  GameMode,
+  GAME_MODE_NAMES,
+  getPieceName,
   HexTile,
   Unit,
   LegalMove,
@@ -13,13 +16,9 @@ import {
   UNIT_DEFINITIONS,
 } from './types/game';
 import { generateGameMap } from './utils/mapGenerator';
-import {
-  calculateLegalMovesForUnit,
-  applyMove,
-  computeInfluenceMap,
-  countInfluencedTiles,
-} from './utils/gameRules';
-import { advanceTurn } from './utils/gameState';
+import { applyMove, computeInfluenceMap, countInfluencedTiles } from './utils/gameRules';
+import { advanceTurn, applyAction, EndReason, getUnitMoves } from './utils/gameState';
+import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
 import { soundEffects } from './utils/soundEffects';
 import { generateGameLogText, downloadGameLog } from './utils/gameExporter';
@@ -37,7 +36,22 @@ import {
   Route,
 } from 'lucide-react';
 
+const MODE_STORAGE_KEY = 'hexdominion-mode';
+
+function loadSavedMode(): GameMode {
+  try {
+    return localStorage.getItem(MODE_STORAGE_KEY) === 'gambit' ? 'gambit' : 'dominion';
+  } catch {
+    return 'dominion';
+  }
+}
+
 export default function App() {
+  // Game Mode (ruleset of the current match)
+  const [mode, setMode] = useState<GameMode>(loadSavedMode);
+  const modeRef = React.useRef(mode);
+  modeRef.current = mode;
+
   // Game Board State
   const [tiles, setTiles] = useState<Map<string, HexTile>>(() => new Map());
   const [units, setUnits] = useState<Unit[]>([]);
@@ -62,8 +76,17 @@ export default function App() {
   const [lastMove, setLastMove] = useState<MoveRecord | null>(null);
   const [showGameOverModal, setShowGameOverModal] = useState<boolean>(true);
 
-  // Modals & Settings
+  // Outcome
   const [winner, setWinner] = useState<Team | null>(null);
+  const [isDraw, setIsDraw] = useState<boolean>(false);
+  const [endReason, setEndReason] = useState<EndReason | null>(null);
+  const gameEnded = winner !== null || isDraw;
+  // Gambit: consecutive moves without a capture (draw at the limit)
+  const [quietMoves, setQuietMoves] = useState<number>(0);
+  const quietMovesRef = React.useRef(quietMoves);
+  quietMovesRef.current = quietMoves;
+
+  // Modals & Settings
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [showLastMove, setShowLastMove] = useState<boolean>(true);
@@ -83,9 +106,15 @@ export default function App() {
   const roundNumberRef = React.useRef(roundNumber);
   roundNumberRef.current = roundNumber;
 
-  // Initialize a fresh game
-  const initGame = useCallback(() => {
-    const { tiles: newTiles, units: newUnits } = generateGameMap();
+  // Start a fresh match with the given ruleset
+  const startMatch = useCallback((nextMode: GameMode) => {
+    const { tiles: newTiles, units: newUnits } = generateGameMap(nextMode);
+    setMode(nextMode);
+    try {
+      localStorage.setItem(MODE_STORAGE_KEY, nextMode);
+    } catch {
+      // Persisting the mode is only a convenience
+    }
     setTiles(newTiles);
     setUnits(newUnits);
     setRoundNumber(1);
@@ -96,6 +125,9 @@ export default function App() {
     setLegalMoves([]);
     setIsAiThinking(false);
     setWinner(null);
+    setIsDraw(false);
+    setEndReason(null);
+    setQuietMoves(0);
     setMoveCount(0);
     setMoveHistory([]);
     setUnitHistory([newUnits]);
@@ -105,6 +137,8 @@ export default function App() {
     setTurnNotice(null);
     soundEffects.playRoundChange();
   }, []);
+
+  const initGame = useCallback(() => startMatch(modeRef.current), [startMatch]);
 
   // Run initial game setup once on mount
   useEffect(() => {
@@ -122,9 +156,9 @@ export default function App() {
       setLegalMoves([]);
       return;
     }
-    const moves = calculateLegalMovesForUnit(selectedUnit, tiles, units);
+    const moves = getUnitMoves(mode, selectedUnit, tiles, units);
     setLegalMoves(moves);
-  }, [selectedUnit, tiles, units]);
+  }, [mode, selectedUnit, tiles, units]);
 
   // Check if round should transition or initiative should switch
   const evaluateNextTurn = useCallback(
@@ -158,6 +192,68 @@ export default function App() {
   const executeMove = useCallback(
     (unit: Unit, move: LegalMove) => {
       const fromCoord = { ...unit.coord };
+
+      if (mode === 'gambit') {
+        const next = applyAction(
+          { mode, units, currentTurn: unit.team, roundNumber, winner: null, quietMoves },
+          tiles,
+          { kind: 'move', unitId: unit.id, move }
+        );
+        const captured = move.isAttack
+          ? units.find((u) => u.id === move.targetUnitId) ?? null
+          : null;
+        const givesCheck = isKingInCheck(next.currentTurn, tiles, next.units);
+
+        if (captured) soundEffects.playAttack();
+        else soundEffects.playMove();
+
+        const nextMoveCount = moveCount + 1;
+        setMoveCount(nextMoveCount);
+        setUnits(next.units);
+        setSelectedUnit(null);
+        setLegalMoves([]);
+        setLastMover(unit.team);
+
+        const record: MoveRecord = {
+          id: `move-${nextMoveCount}`,
+          turnNumber: nextMoveCount,
+          roundNumber,
+          team: unit.team,
+          unitRank: unit.rank,
+          unitName: getPieceName('gambit', unit.rank),
+          from: fromCoord,
+          to: { ...move.target },
+          path: move.path,
+          isAttack: move.isAttack,
+          capturedRank: captured?.rank,
+          capturedName: captured ? getPieceName('gambit', captured.rank) : undefined,
+          facing: move.facing,
+          isCheck: givesCheck,
+          isWinningMove: next.winner !== null,
+          timestamp: Date.now(),
+        };
+        setMoveHistory((prev) => [...prev, record]);
+        setUnitHistory((prev) => [...prev, next.units]);
+        setLastMove(record);
+        setQuietMoves(next.quietMoves ?? 0);
+        setRoundNumber(next.roundNumber);
+
+        if (next.winner || next.isDraw) {
+          setWinner(next.winner);
+          setIsDraw(Boolean(next.isDraw));
+          setEndReason(next.endReason ?? null);
+          setShowGameOverModal(true);
+          if (next.winner === 'player') soundEffects.playVictory();
+          else if (next.winner === 'ai') soundEffects.playDefeat();
+          else soundEffects.playRoundChange();
+        } else {
+          setCurrentTurn(next.currentTurn);
+          if (givesCheck && next.currentTurn === 'player') setTurnNotice('Check! Your King is under attack');
+          setTurnTrigger((t) => t + 1);
+        }
+        return;
+      }
+
       const {
         newUnits,
         capturedUnit,
@@ -204,6 +300,7 @@ export default function App() {
 
       if (isGameOver && gameWinner) {
         setWinner(gameWinner);
+        setEndReason('king-captured');
         setShowGameOverModal(true);
         if (gameWinner === 'player') {
           soundEffects.playVictory();
@@ -214,19 +311,19 @@ export default function App() {
         evaluateNextTurn(unit.team, tiles, newUnits);
       }
     },
-    [tiles, units, roundNumber, moveCount, evaluateNextTurn]
+    [mode, tiles, units, roundNumber, moveCount, quietMoves, evaluateNextTurn]
   );
 
   // Player selects an active unit
   const handleSelectUnit = useCallback(
     (unit: Unit) => {
-      if (unit.team !== 'player' || currentTurn !== 'player' || isAiThinking || winner) return;
+      if (unit.team !== 'player' || currentTurn !== 'player' || isAiThinking || gameEnded) return;
 
       if (unit.hasMovedThisRound) {
         return;
       }
 
-      const moves = calculateLegalMovesForUnit(unit, tiles, units);
+      const moves = getUnitMoves(mode, unit, tiles, units);
 
       // Units without legal moves can still be selected to preview lifting their influence
       if (selectedUnit?.id === unit.id) {
@@ -239,16 +336,16 @@ export default function App() {
       setLegalMoves(moves);
       soundEffects.playSelect();
     },
-    [currentTurn, isAiThinking, winner, selectedUnit, tiles, units]
+    [mode, currentTurn, isAiThinking, gameEnded, selectedUnit, tiles, units]
   );
 
   // Player executes move on target hex
   const handlePlayerMove = useCallback(
     (move: LegalMove) => {
-      if (!selectedUnit || currentTurn !== 'player' || isAiThinking || winner) return;
+      if (!selectedUnit || currentTurn !== 'player' || isAiThinking || gameEnded) return;
       executeMove(selectedUnit, move);
     },
-    [selectedUnit, currentTurn, isAiThinking, winner, executeMove]
+    [selectedUnit, currentTurn, isAiThinking, gameEnded, executeMove]
   );
 
   // Execute move and evaluate turn refs to avoid stale closures
@@ -276,7 +373,7 @@ export default function App() {
   // AI Turn Execution Loop
   useEffect(() => {
     const worker = aiWorkerRef.current;
-    if (currentTurn !== 'ai' || winner || !worker) {
+    if (currentTurn !== 'ai' || gameEnded || !worker) {
       setIsAiThinking(false);
       return;
     }
@@ -311,10 +408,12 @@ export default function App() {
     const request: AIRequest = {
       requestId,
       state: {
+        mode: modeRef.current,
         units: unitsRef.current,
         currentTurn: 'ai',
         roundNumber: roundNumberRef.current,
         winner: null,
+        quietMoves: quietMovesRef.current,
       },
       tiles: tilesRef.current,
       options: {
@@ -329,7 +428,7 @@ export default function App() {
       worker.removeEventListener('message', onMessage);
       clearTimeout(applyTimer);
     };
-  }, [currentTurn, winner, turnTrigger]);
+  }, [currentTurn, gameEnded, turnTrigger]);
 
   // Statistics & Score tracking
   const stats = useMemo(() => {
@@ -357,7 +456,13 @@ export default function App() {
   }, [tiles, units]);
 
   // Post-game replay: show the board as it was after the selected move
-  const isReviewing = Boolean(winner) && !showGameOverModal;
+  const isReviewing = gameEnded && !showGameOverModal;
+
+  // Gambit: is the side to move in check?
+  const sideToMoveInCheck = useMemo(
+    () => mode === 'gambit' && !gameEnded && isKingInCheck(currentTurn, tiles, units),
+    [mode, gameEnded, currentTurn, tiles, units]
+  );
   const displayUnits = isReviewing ? unitHistory[replayIndex] ?? units : units;
   const displayLastMove = isReviewing
     ? replayIndex > 0
@@ -377,7 +482,9 @@ export default function App() {
   // Text Export Handlers
   const handleExportText = useCallback(() => {
     downloadGameLog({
+      mode,
       winner,
+      endReason,
       roundNumber,
       totalMoves: moveCount,
       playerInfluencePct: stats.playerInfluencePct,
@@ -388,11 +495,13 @@ export default function App() {
       units,
       moveHistory,
     });
-  }, [winner, roundNumber, moveCount, stats, tiles, units, moveHistory]);
+  }, [mode, winner, endReason, roundNumber, moveCount, stats, tiles, units, moveHistory]);
 
   const handleCopyText = useCallback(async (): Promise<boolean> => {
     const text = generateGameLogText({
+      mode,
       winner,
+      endReason,
       roundNumber,
       totalMoves: moveCount,
       playerInfluencePct: stats.playerInfluencePct,
@@ -410,7 +519,7 @@ export default function App() {
       console.error('Failed to copy text', err);
       return false;
     }
-  }, [winner, roundNumber, moveCount, stats, tiles, units, moveHistory]);
+  }, [mode, winner, endReason, roundNumber, moveCount, stats, tiles, units, moveHistory]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 select-none">
@@ -423,7 +532,9 @@ export default function App() {
         <div className="flex items-center gap-2 text-xs">
           <span
             className={`w-2 h-2 rounded-full ${
-              winner
+              isDraw
+                ? 'bg-slate-400'
+                : winner
                 ? winner === 'player'
                   ? 'bg-cyan-400 shadow-[0_0_8px_#38bdf8]'
                   : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'
@@ -433,24 +544,27 @@ export default function App() {
             }`}
           />
           <span className="font-medium text-slate-300">
-            {winner ? (
+            {gameEnded ? (
               <span className="font-bold text-white">
-                {winner === 'player' ? 'Victory Achieved' : 'Defeated in Battle'}
+                {isDraw ? 'Draw' : winner === 'player' ? 'Victory Achieved' : 'Defeated in Battle'}
               </span>
             ) : (
               <>
-                Round {roundNumber} ·{' '}
+                {mode === 'gambit' ? 'Move' : 'Round'} {roundNumber} ·{' '}
                 {currentTurn === 'player'
                   ? selectedUnit
                     ? legalMoves.length === 0
                       ? (
                         <span className="text-slate-400">
-                          {UNIT_DEFINITIONS[selectedUnit.rank].name} · no legal moves
+                          {getPieceName(mode, selectedUnit.rank)} · no legal moves
                         </span>
                       )
+                      : mode === 'gambit'
+                      ? getPieceName(mode, selectedUnit.rank)
                       : `${UNIT_DEFINITIONS[selectedUnit.rank].name} (Moves ${UNIT_DEFINITIONS[selectedUnit.rank].speed} · Aura ${UNIT_DEFINITIONS[selectedUnit.rank].auraRank})`
                     : 'Your Turn'
                   : 'AI thinking...'}
+                {sideToMoveInCheck && <span className="ml-1.5 font-bold text-rose-400">Check!</span>}
               </>
             )}
           </span>
@@ -459,9 +573,25 @@ export default function App() {
 
       {/* 2. TOP RIGHT FLOATING CONTROLS: Utility Buttons */}
       <div className="absolute top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto">
+        {/* Game Mode Switch (starts a new match in the chosen ruleset) */}
+        <div className="flex items-center p-0.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl text-xs font-semibold">
+          {(['dominion', 'gambit'] as GameMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => m !== mode && startMatch(m)}
+              title={m === mode ? `Playing ${GAME_MODE_NAMES[m]}` : `Start a ${GAME_MODE_NAMES[m]} match`}
+              className={`px-2.5 py-1 rounded-lg transition-colors ${
+                m === mode ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {GAME_MODE_NAMES[m]}
+            </button>
+          ))}
+        </div>
+
         {/* Subtle New Match Button */}
         <button
-          onClick={initGame}
+          onClick={() => initGame()}
           className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 backdrop-blur-md shadow-xl transition-all flex items-center gap-1.5"
         >
           <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
@@ -510,7 +640,8 @@ export default function App() {
         </button>
       </div>
 
-      {/* 3. TOP CENTER INFLUENCE RATIO BAR */}
+      {/* 3. TOP CENTER INFLUENCE RATIO BAR (Dominion only) */}
+      {mode === 'dominion' && (
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-md text-[11px] font-mono tabular-nums shadow-lg pointer-events-none">
         <div className="flex items-center gap-1.5 text-cyan-400">
           <Crown className="w-3.5 h-3.5" />
@@ -533,9 +664,10 @@ export default function App() {
           <Crown className="w-3.5 h-3.5" />
         </div>
       </div>
+      )}
 
       {/* 3.5 TURN NOTICE (e.g. one side has no legal move and the other continues) */}
-      {turnNotice && !winner && (
+      {turnNotice && !gameEnded && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 backdrop-blur-md shadow-lg text-xs text-slate-300 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-none">
           {turnNotice}
         </div>
@@ -545,6 +677,7 @@ export default function App() {
       {/* While reviewing, leave room at the bottom for the replay controller */}
       <div className={`w-full h-full ${isReviewing ? 'pb-28' : ''}`}>
         <HexBoard
+          mode={mode}
           tiles={tiles}
           units={displayUnits}
           selectedUnit={selectedUnit}
@@ -553,31 +686,38 @@ export default function App() {
           isAiThinking={isAiThinking}
           lastMove={displayLastMove}
           showLastMove={isReviewing || showLastMove}
-          isGameOver={Boolean(winner)}
+          isGameOver={gameEnded}
           isFinalMove={!isReviewing || replayIndex === moveHistory.length}
           onSelectUnit={handleSelectUnit}
           onExecuteMove={handlePlayerMove}
+          onDeselect={() => {
+            setSelectedUnit(null);
+            setLegalMoves([]);
+          }}
         />
       </div>
 
       {/* 5. POST-GAME MOVE-BY-MOVE REPLAY CONTROLLER */}
-      {winner && isReviewing && (
+      {isReviewing && (
         <ReplayControls
+          mode={mode}
           moveHistory={moveHistory}
           index={replayIndex}
           onIndexChange={setReplayIndex}
           onShowSummary={() => setShowGameOverModal(true)}
           onExportText={handleExportText}
-          onNewMatch={initGame}
+          onNewMatch={() => initGame()}
         />
       )}
 
       {/* 6. MODALS */}
-      <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
+      <RulesModal mode={mode} isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
 
-      {winner && showGameOverModal && (
+      {gameEnded && showGameOverModal && (
         <GameOverModal
+          mode={mode}
           winner={winner}
+          endReason={endReason}
           roundNumber={roundNumber}
           totalMoves={moveCount}
           playerInfluencePct={stats.playerInfluencePct}
@@ -585,7 +725,7 @@ export default function App() {
           playerDefeats={stats.playerDefeats}
           aiDefeats={stats.aiDefeats}
           lastMove={lastMove}
-          onRestart={initGame}
+          onRestart={() => initGame()}
           onInspectBoard={() => {
             setReplayIndex(moveHistory.length);
             setShowGameOverModal(false);

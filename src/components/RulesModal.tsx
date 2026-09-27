@@ -1,13 +1,88 @@
 import React from 'react';
-import { X, Crown, Star, Shield, Navigation, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
-import { UNIT_DEFINITIONS } from '../types/game';
+import { X, Crown, Star, Shield, Navigation, ChessRook, ChessBishop, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { GameMode, GAMBIT_PIECES, UnitRank } from '../types/game';
 
 interface RulesModalProps {
+  mode: GameMode;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
+const GAMBIT_ICONS: Record<UnitRank, React.ReactNode> = {
+  4: <Crown className="w-5 h-5 text-white" />,
+  3: <ChessRook className="w-5 h-5 text-white" />,
+  2: <ChessBishop className="w-5 h-5 text-white" />,
+  1: <Navigation className="w-5 h-5 text-white" />,
+};
+
+/**
+ * Rules of the chess-like Gambit mode.
+ */
+const GambitRules: React.FC = () => (
+  <div className="overflow-y-auto px-6 py-5 space-y-6 text-sm">
+    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+      <div className="flex items-center gap-2 text-amber-400 font-semibold mb-1">
+        <Crown className="w-4 h-4" />
+        <span>Victory Condition: Checkmate</span>
+      </div>
+      <p className="text-slate-300 text-xs leading-relaxed">
+        Players alternate, moving exactly one piece per turn. You may never leave your own King in check. Win by
+        checkmating the enemy King: it is attacked and no move gets it out. A player without any legal move who is
+        not in check is <strong className="text-white">stalemated</strong> (draw). The game is also drawn after 100
+        consecutive moves without a capture.
+      </p>
+    </div>
+
+    <div>
+      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+        The Pieces (no ranks, 10 per army)
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {([4, 3, 2, 1] as UnitRank[]).map((rank) => (
+          <div key={rank} className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex gap-3">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-b from-slate-600 to-slate-800 flex items-center justify-center shrink-0">
+              {GAMBIT_ICONS[rank]}
+            </div>
+            <div>
+              <span className="font-bold text-white text-xs">{GAMBIT_PIECES[rank].name}</span>
+              <p className="text-[11px] text-slate-400 mt-1 leading-snug">{GAMBIT_PIECES[rank].description}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <div className="space-y-2">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Movement</h3>
+      <ul className="space-y-1.5 text-xs text-slate-300">
+        <li className="flex items-start gap-2">
+          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+          <span>
+            <strong>No jumping:</strong> pieces cannot pass through any other piece. Capture by moving onto an enemy
+            piece.
+          </span>
+        </li>
+        <li className="flex items-start gap-2">
+          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+          <span>
+            <strong>Three tile colors:</strong> like the two colors of a chess board. Bishops move through hex
+            corners and never leave their color, so each army has one Bishop per color.
+          </span>
+        </li>
+        <li className="flex items-start gap-2">
+          <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+          <span>
+            <strong>Scouts:</strong> the arrow points at the edge the Scout faces. With 4 points per move, a step
+            forward or a 60° turn costs 1 point, so a Scout can advance, turn and advance again, or just turn in
+            place. When a tile can be reached with different facings, choose the final facing from the arrows shown.
+          </span>
+        </li>
+      </ul>
+    </div>
+  </div>
+);
+
+export const RulesModal: React.FC<RulesModalProps> = ({ mode, isOpen, onClose }) => {
   if (!isOpen) return null;
 
   return (
@@ -20,7 +95,9 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               Codex of War: Rules of Engagement
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Hex influence warfare, aura support, and initiative doctrine
+              {mode === 'gambit'
+                ? 'Gambit: chess-like rules on the hex board'
+                : 'Dominion: hex influence warfare, aura support, and initiative doctrine'}
             </p>
           </div>
           <button
@@ -32,6 +109,9 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Content Scrollable */}
+        {mode === 'gambit' ? (
+          <GambitRules />
+        ) : (
         <div className="overflow-y-auto px-6 py-5 space-y-6 text-sm">
           {/* 1. Victory Condition */}
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
@@ -206,6 +286,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
             </ul>
           </div>
         </div>
+        )}
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-950 flex justify-end">

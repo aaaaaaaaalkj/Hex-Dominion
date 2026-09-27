@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { MoveRecord } from '../types/game';
+import { GameMode, MoveRecord } from '../types/game';
+import { DIRECTION_NAMES } from '../utils/hexMath';
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 
 interface ReplayControlsProps {
+  mode: GameMode;
   moveHistory: MoveRecord[];
   index: number; // 0 = starting position, n = board after move n
   onIndexChange: (index: number) => void;
@@ -23,16 +25,30 @@ interface ReplayControlsProps {
 
 const PLAYBACK_INTERVAL_MS = 900;
 
-function describeMove(move: MoveRecord): string {
+function describeMove(move: MoveRecord, mode: GameMode): string {
   const side = move.team === 'player' ? 'You' : 'AI';
   const to = `(${move.to.q},${move.to.r})`;
+  const turnedInPlace = move.from.q === move.to.q && move.from.r === move.to.r;
   let action: string;
   if (move.isAttack) {
-    action = `struck ${move.capturedName} at ${to} · ATK ${move.attackRank} vs DEF ${move.defenseRank}`;
+    action =
+      mode === 'gambit'
+        ? `captured ${move.capturedName} at ${to}`
+        : `struck ${move.capturedName} at ${to} · ATK ${move.attackRank} vs DEF ${move.defenseRank}`;
+  } else if (turnedInPlace && move.facing !== undefined) {
+    action = `turned to face ${DIRECTION_NAMES[move.facing]}`;
   } else {
     action = `moved (${move.from.q},${move.from.r}) → ${to}`;
+    if (move.facing !== undefined) action += ` facing ${DIRECTION_NAMES[move.facing]}`;
   }
-  return `${side} · ${move.unitName} ${action}${move.isWinningMove ? ' · Decisive blow' : ''}`;
+  const outcome = move.isWinningMove
+    ? mode === 'gambit'
+      ? ' · Checkmate'
+      : ' · Decisive blow'
+    : move.isCheck
+    ? ' · Check'
+    : '';
+  return `${side} · ${move.unitName} ${action}${outcome}`;
 }
 
 const iconButton =
@@ -41,6 +57,7 @@ const actionButton =
   'px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors';
 
 export const ReplayControls: React.FC<ReplayControlsProps> = ({
+  mode,
   moveHistory,
   index,
   onIndexChange,
@@ -115,10 +132,10 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
           }`}
         />
         <span className="font-bold text-white shrink-0">
-          {current ? `Round ${current.roundNumber}` : 'Start'}
+          {current ? `${mode === 'gambit' ? 'Move' : 'Round'} ${current.roundNumber}` : 'Start'}
         </span>
-        <span className="text-slate-300 truncate flex-1" title={current ? describeMove(current) : undefined}>
-          {current ? describeMove(current) : 'Starting position'}
+        <span className="text-slate-300 truncate flex-1" title={current ? describeMove(current, mode) : undefined}>
+          {current ? describeMove(current, mode) : 'Starting position'}
         </span>
         <button onClick={onShowSummary} className={actionButton} title="Summary">
           <Trophy className="w-3.5 h-3.5 text-amber-400" />

@@ -1,8 +1,12 @@
-import { MoveRecord, HexTile, Unit, Team, UNIT_DEFINITIONS } from '../types/game';
+import { GameMode, GAME_MODE_NAMES, MoveRecord, HexTile, Unit, Team, getPieceName } from '../types/game';
 import { calculateDefensiveRank } from './gameRules';
+import { EndReason } from './gameState';
+import { DIRECTION_NAMES } from './hexMath';
 
 export interface GameExportData {
+  mode: GameMode;
   winner: Team | null;
+  endReason: EndReason | null;
   roundNumber: number;
   totalMoves: number;
   playerInfluencePct: number;
@@ -16,7 +20,9 @@ export interface GameExportData {
 
 export function generateGameLogText(data: GameExportData): string {
   const {
+    mode,
     winner,
+    endReason,
     roundNumber,
     totalMoves,
     playerInfluencePct,
@@ -29,11 +35,22 @@ export function generateGameLogText(data: GameExportData): string {
 
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
 
+  const isGambit = mode === 'gambit';
+  const how =
+    endReason === 'checkmate'
+      ? 'Checkmate'
+      : endReason === 'stalemate'
+      ? 'Stalemate'
+      : endReason === 'no-captures'
+      ? 'no captures for 100 moves'
+      : 'King Eliminated';
   let resultStr = 'IN PROGRESS';
   if (winner === 'player') {
-    resultStr = 'PLAYER VICTORY (AI King Eliminated)';
+    resultStr = `PLAYER VICTORY (${how})`;
   } else if (winner === 'ai') {
-    resultStr = 'AI DEFEAT (Player King Eliminated)';
+    resultStr = `AI VICTORY (${how})`;
+  } else if (endReason) {
+    resultStr = `DRAW (${how})`;
   }
 
   const lines: string[] = [];
@@ -42,10 +59,13 @@ export function generateGameLogText(data: GameExportData): string {
   lines.push('                   HEXDOMINION - MATCH TRANSCRIPT                     ');
   lines.push('======================================================================');
   lines.push(`Date:               ${timestamp}`);
+  lines.push(`Mode:               ${GAME_MODE_NAMES[mode]}`);
   lines.push(`Result:             ${resultStr}`);
-  lines.push(`Rounds Fought:      ${roundNumber}`);
+  if (!isGambit) lines.push(`Rounds Fought:      ${roundNumber}`);
   lines.push(`Total Moves:        ${totalMoves}`);
-  lines.push(`Final Influence:    Player: ${playerInfluencePct}%  |  AI: ${aiInfluencePct}%  |  Neutral: ${Math.max(0, 100 - playerInfluencePct - aiInfluencePct)}%`);
+  if (!isGambit) {
+    lines.push(`Final Influence:    Player: ${playerInfluencePct}%  |  AI: ${aiInfluencePct}%  |  Neutral: ${Math.max(0, 100 - playerInfluencePct - aiInfluencePct)}%`);
+  }
   lines.push(`Casualties:         Player lost ${playerDefeats} unit(s)  |  AI lost ${aiDefeats} unit(s)`);
   lines.push('======================================================================\n');
 
@@ -58,19 +78,22 @@ export function generateGameLogText(data: GameExportData): string {
     const mover = lastMove.team === 'player' ? 'Player (Blue)' : 'AI (Red)';
     const fromStr = `(q: ${lastMove.from.q}, r: ${lastMove.from.r})`;
     const toStr = `(q: ${lastMove.to.q}, r: ${lastMove.to.r})`;
-    lines.push(`Move #${lastMove.turnNumber} [Round ${lastMove.roundNumber}] by ${mover}`);
-    lines.push(`Unit:       ${lastMove.unitName} (Level ${lastMove.unitRank})`);
+    lines.push(`Move #${lastMove.turnNumber} [${isGambit ? 'Move' : 'Round'} ${lastMove.roundNumber}] by ${mover}`);
+    lines.push(`Unit:       ${lastMove.unitName}${isGambit ? '' : ` (Level ${lastMove.unitRank})`}`);
     lines.push(`Position:   ${fromStr} -> ${toStr}`);
     if (lastMove.isAttack) {
-      lines.push(`Combat:     Struck down ${lastMove.capturedName} (Level ${lastMove.capturedRank})`);
+      lines.push(`Combat:     Struck down ${lastMove.capturedName}${isGambit ? '' : ` (Level ${lastMove.capturedRank})`}`);
       if (lastMove.attackRank !== undefined && lastMove.defenseRank !== undefined) {
         lines.push(`Odds:       ATK ${lastMove.attackRank} vs DEF ${lastMove.defenseRank}`);
       }
-      if (lastMove.isWinningMove) {
+      if (lastMove.isWinningMove && !isGambit) {
         lines.push(`Outcome:    *** FATAL STRIKE: Opponent King eliminated! GAME OVER ***`);
       }
     } else {
       lines.push('Action:     Maneuver');
+    }
+    if (isGambit && lastMove.isWinningMove) {
+      lines.push(`Outcome:    *** CHECKMATE! GAME OVER ***`);
     }
     lines.push('----------------------------------------------------------------------\n');
   }
@@ -79,23 +102,19 @@ export function generateGameLogText(data: GameExportData): string {
   lines.push('----------------------------------------------------------------------');
   lines.push('FINAL BATTLEFIELD STATUS');
   lines.push('----------------------------------------------------------------------');
+  const rosterLine = (u: Unit) => {
+    const name = getPieceName(mode, u.rank).padEnd(10);
+    if (u.isDefeated) return isGambit ? `  - ${name} : CAPTURED` : `  - Level ${u.rank} ${name} : DEFEATED`;
+    const at = `at (q: ${u.coord.q}, r: ${u.coord.r})`;
+    if (isGambit) {
+      return `  - ${name} : ${at}${u.rank === 1 && u.facing !== undefined ? ` facing ${DIRECTION_NAMES[u.facing]}` : ''}`;
+    }
+    return `  - Level ${u.rank} ${name} : ALIVE ${at} [DEF ${calculateDefensiveRank(u, units)}]`;
+  };
   lines.push('PLAYER UNITS (Blue):');
-  const playerUnits = units.filter((u) => u.team === 'player');
-  for (const u of playerUnits) {
-    const def = UNIT_DEFINITIONS[u.rank];
-    const defRank = calculateDefensiveRank(u, units);
-    const status = u.isDefeated ? 'DEFEATED' : `ALIVE at (q: ${u.coord.q}, r: ${u.coord.r}) [DEF ${defRank}]`;
-    lines.push(`  - Level ${u.rank} ${def.name.padEnd(10)} : ${status}`);
-  }
-
+  for (const u of units.filter((u) => u.team === 'player')) lines.push(rosterLine(u));
   lines.push('\nAI UNITS (Red):');
-  const aiUnits = units.filter((u) => u.team === 'ai');
-  for (const u of aiUnits) {
-    const def = UNIT_DEFINITIONS[u.rank];
-    const defRank = calculateDefensiveRank(u, units);
-    const status = u.isDefeated ? 'DEFEATED' : `ALIVE at (q: ${u.coord.q}, r: ${u.coord.r}) [DEF ${defRank}]`;
-    lines.push(`  - Level ${u.rank} ${def.name.padEnd(10)} : ${status}`);
-  }
+  for (const u of units.filter((u) => u.team === 'ai')) lines.push(rosterLine(u));
   lines.push('----------------------------------------------------------------------\n');
 
   // Complete Move History
@@ -113,12 +132,21 @@ export function generateGameLogText(data: GameExportData): string {
 
       let detail = '';
       if (m.isAttack) {
-        detail = `ATTACK ${m.capturedName} (L${m.capturedRank}) [ATK ${m.attackRank ?? '?'} vs DEF ${m.defenseRank ?? '?'}]`;
-        if (m.isWinningMove) {
-          detail += ' *** DECISIVE BLOW ***';
-        }
+        detail = isGambit
+          ? `CAPTURE ${m.capturedName}`
+          : `ATTACK ${m.capturedName} (L${m.capturedRank}) [ATK ${m.attackRank ?? '?'} vs DEF ${m.defenseRank ?? '?'}]`;
+      } else if (m.from.q === m.to.q && m.from.r === m.to.r && m.facing !== undefined) {
+        detail = `Turned to face ${DIRECTION_NAMES[m.facing]}`;
       } else {
         detail = 'Moved';
+      }
+      if (isGambit && m.facing !== undefined && !(m.from.q === m.to.q && m.from.r === m.to.r)) {
+        detail += ` (facing ${DIRECTION_NAMES[m.facing]})`;
+      }
+      if (m.isWinningMove) {
+        detail += isGambit ? ' *** CHECKMATE ***' : ' *** DECISIVE BLOW ***';
+      } else if (m.isCheck) {
+        detail += ' + CHECK';
       }
 
       const pathStr = m.path && m.path.length > 1
@@ -126,7 +154,7 @@ export function generateGameLogText(data: GameExportData): string {
         : '';
 
       lines.push(
-        `#${m.turnNumber.toString().padStart(3, ' ')} [R${m.roundNumber}] ${teamTag} ${m.unitName.padEnd(9, ' ')} ${fromStr.padEnd(8, ' ')} -> ${toStr.padEnd(8, ' ')} | ${detail}${pathStr}`
+        `#${m.turnNumber.toString().padStart(3, ' ')} [${isGambit ? 'M' : 'R'}${m.roundNumber}] ${teamTag} ${m.unitName.padEnd(9, ' ')} ${fromStr.padEnd(8, ' ')} -> ${toStr.padEnd(8, ' ')} | ${detail}${pathStr}`
       );
     }
   }

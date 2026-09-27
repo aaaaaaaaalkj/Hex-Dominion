@@ -1,4 +1,4 @@
-import { HexCoord, HexTile, Unit, UnitRank } from '../types/game';
+import { GameMode, HexCoord, HexTile, Unit, UnitRank } from '../types/game';
 import { coordKey, getHexNeighbors } from './hexMath';
 
 export interface GeneratedMap {
@@ -6,7 +6,7 @@ export interface GeneratedMap {
   units: Unit[];
 }
 
-export function generateGameMap(): GeneratedMap {
+export function generateGameMap(mode: GameMode = 'dominion'): GeneratedMap {
   // Complete regular hexagon of radius 4 containing all 61 tiles.
   // Full connectivity with zero missing corner tiles.
   const radius = 4;
@@ -109,8 +109,39 @@ export function generateGameMap(): GeneratedMap {
 
   return {
     tiles: tileMap,
-    units,
+    units: mode === 'gambit' ? toGambitSetup(units) : units,
   };
+}
+
+/**
+ * Gambit setup: the King swaps places with the central back-row piece (a Bishop
+ * in Gambit), which keeps the three Bishops on three different tile colors.
+ * Scouts face the enemy through one of the two forward edges, outer pairs turned
+ * toward the center.
+ */
+function toGambitSetup(units: Unit[]): Unit[] {
+  const swaps: Record<string, HexCoord> = {
+    'player-l4-king': { q: -2, r: 4 },
+    'player-l2-bastion-center': { q: -1, r: 2 },
+    'ai-l4-king': { q: 2, r: -4 },
+    'ai-l2-bastion-center': { q: 1, r: -2 },
+  };
+  // Facing indices into HEX_DIRECTIONS: 1 = NE, 2 = NW, 4 = SW, 5 = SE
+  const scoutFacing: Record<string, number> = {
+    'player-l1-scout-1': 1,
+    'player-l1-scout-2': 1,
+    'player-l1-scout-3': 2,
+    'player-l1-scout-4': 2,
+    'ai-l1-scout-1': 5,
+    'ai-l1-scout-2': 5,
+    'ai-l1-scout-3': 4,
+    'ai-l1-scout-4': 4,
+  };
+  return units.map((u) => ({
+    ...u,
+    coord: swaps[u.id] ? { ...swaps[u.id] } : u.coord,
+    facing: scoutFacing[u.id],
+  }));
 }
 
 function ensureConnectivity(tileMap: Map<string, HexTile>) {

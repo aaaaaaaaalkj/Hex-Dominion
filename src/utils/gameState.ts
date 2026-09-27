@@ -1,14 +1,42 @@
-import { HexTile, LegalMove, Team, Unit } from '../types/game';
+import { GameMode, HexTile, LegalMove, Team, Unit } from '../types/game';
 import { applyMove, calculateLegalMovesForUnit, hasAnyLegalMoves } from './gameRules';
+import { applyGambitMove, calculateGambitMoves, hasAnyGambitMove, isKingInCheck } from './gambitRules';
+
+// Gambit: a draw is declared after this many consecutive moves without a capture
+export const GAMBIT_QUIET_MOVE_LIMIT = 100;
+
+export type EndReason = 'king-captured' | 'checkmate' | 'stalemate' | 'no-captures';
 
 /**
  * Pure, immutable game-state model shared by the UI and the AI search.
  */
 export interface GameState {
+  mode: GameMode;
   units: Unit[];
   currentTurn: Team;
-  roundNumber: number;
+  roundNumber: number; // Dominion: round; Gambit: full-move number
   winner: Team | null;
+  isDraw?: boolean;
+  endReason?: EndReason;
+  quietMoves?: number; // Gambit: consecutive moves without a capture
+}
+
+export function isGameOver(state: GameState): boolean {
+  return state.winner !== null || Boolean(state.isDraw);
+}
+
+/**
+ * Legal moves of one unit under the state's rules.
+ */
+export function getUnitMoves(
+  mode: GameMode,
+  unit: Unit,
+  tiles: Map<string, HexTile>,
+  units: Unit[]
+): LegalMove[] {
+  return mode === 'gambit'
+    ? calculateGambitMoves(unit, tiles, units)
+    : calculateLegalMovesForUnit(unit, tiles, units);
 }
 
 export type GameAction =
@@ -67,7 +95,18 @@ export function advanceTurn(
  * All actions available to the side to move.
  */
 export function getActions(state: GameState, tiles: Map<string, HexTile>): GameAction[] {
-  if (state.winner) return [];
+  if (isGameOver(state)) return [];
+
+  if (state.mode === 'gambit') {
+    const actions: GameAction[] = [];
+    for (const unit of state.units) {
+      if (unit.team !== state.currentTurn || unit.isDefeated) continue;
+      for (const move of calculateGambitMoves(unit, tiles, state.units)) {
+        actions.push({ kind: 'move', unitId: unit.id, move });
+      }
+    }
+    return actions; // never empty: a side without moves is already mated or stalemated
+  }
 
   const actions: GameAction[] = [];
   for (const unit of state.units) {
@@ -87,13 +126,15 @@ export function applyAction(
   tiles: Map<string, HexTile>,
   action: GameAction
 ): GameState {
+  if (state.mode === 'gambit') return applyGambitAction(state, tiles, action);
+
   const mover = state.currentTurn;
   let units: Unit[];
 
   if (action.kind === 'move') {
     const result = applyMove(action.unitId, action.move, state.units);
     if (result.isGameOver) {
-      return { ...state, units: result.newUnits, winner: result.winner };
+      return { ...state, units: result.newUnits, winner: result.winner, endReason: 'king-captured' };
     }
     units = result.newUnits;
   } else {
@@ -102,9 +143,45 @@ export function applyAction(
 
   const next = advanceTurn(units, mover, tiles);
   return {
+    mode: state.mode,
     units: next.units,
     currentTurn: next.currentTurn,
     roundNumber: state.roundNumber + (next.newRound ? 1 : 0),
     winner: null,
   };
+}
+
+/**
+ * Gambit: chess-style alternation. After each move the opponent is checked for
+ * checkmate / stalemate, and long stretches without captures end in a draw.
+ */
+function applyGambitAction(
+  state: GameState,
+  tiles: Map<string, HexTile>,
+  action: GameAction
+): GameState {
+  if (action.kind !== 'move') return state;
+
+  const mover = state.currentTurn;
+  const opponent = opponentOf(mover);
+  const { newUnits, capturedUnit } = applyGambitMove(action.unitId, action.move, state.units);
+  const quietMoves = capturedUnit ? 0 : (state.quietMoves ?? 0) + 1;
+  const next: GameState = {
+    mode: 'gambit',
+    units: newUnits,
+    currentTurn: opponent,
+    roundNumber: state.roundNumber + (mover === 'ai' ? 1 : 0),
+    winner: null,
+    quietMoves,
+  };
+
+  if (!hasAnyGambitMove(opponent, tiles, newUnits)) {
+    return isKingInCheck(opponent, tiles, newUnits)
+      ? { ...next, winner: mover, endReason: 'checkmate' }
+      : { ...next, isDraw: true, endReason: 'stalemate' };
+  }
+  if (quietMoves >= GAMBIT_QUIET_MOVE_LIMIT) {
+    return { ...next, isDraw: true, endReason: 'no-captures' };
+  }
+  return next;
 }

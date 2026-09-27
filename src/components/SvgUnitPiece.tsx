@@ -1,8 +1,10 @@
 import React from 'react';
-import { Unit, UnitRank } from '../types/game';
+import { GameMode, Unit, UnitRank } from '../types/game';
+import { directionAngle } from '../utils/hexMath';
 
 interface SvgUnitPieceProps {
   unit: Unit;
+  mode?: GameMode;
   cx: number;
   cy: number;
   isAttackTarget?: boolean;
@@ -49,18 +51,46 @@ const SYMBOL_PATH: Record<UnitRank, string> = {
   1: 'M 0,-9 L 8,7.5 L 0,3.5 L -8,7.5 Z',
 };
 
+// Gambit symbols: King crown, Rook tower, Bishop mitre (with slit), Scout arrowhead
+const GAMBIT_SYMBOL_PATH: Record<UnitRank, string> = {
+  4: SYMBOL_PATH[4],
+  3: 'M -8,-10 L -4.6,-10 L -4.6,-7 L -1.6,-7 L -1.6,-10 L 1.6,-10 L 1.6,-7 L 4.6,-7 L 4.6,-10 L 8,-10 L 8,-3.5 L 5.5,-1.5 L 5.5,6 L 8,8 L 8,10.5 L -8,10.5 L -8,8 L -5.5,6 L -5.5,-1.5 L -8,-3.5 Z',
+  2: 'M 0,-11 C 5,-7 7.5,-2.5 7.5,2 C 7.5,5 5.5,7 3.5,8 L 7,8 L 7,11 L -7,11 L -7,8 L -3.5,8 C -5.5,7 -7.5,5 -7.5,2 C -7.5,-2.5 -5,-7 0,-11 Z M 1.4,-6.2 L 3.6,-4.6 L -0.6,1.2 L -2.8,-0.4 Z',
+  1: SYMBOL_PATH[1],
+};
+
+// Gambit has no ranks: pieces are drawn at similar sizes
+const GAMBIT_SYMBOL_SCALE: Record<UnitRank, number> = {
+  1: 1.15,
+  2: 1.35,
+  3: 1.35,
+  4: 1.5,
+};
+
 export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
   unit,
+  mode = 'dominion',
   cx,
   cy,
   isAttackTarget = false,
 }) => {
+  const isGambit = mode === 'gambit';
   const isMoved = unit.hasMovedThisRound;
-  const scale = SYMBOL_SCALE[unit.rank];
-  const facingUp = unit.team === 'player';
+  const scale = (isGambit ? GAMBIT_SYMBOL_SCALE : SYMBOL_SCALE)[unit.rank];
 
-  const symbol = SYMBOL_PATH[unit.rank];
-  const transform = `scale(${scale})${unit.rank === 1 && !facingUp ? ' rotate(180)' : ''}`;
+  // Scouts point toward the enemy (Dominion) or toward their facing edge (Gambit)
+  let rotation = 0;
+  if (unit.rank === 1) {
+    rotation =
+      isGambit && unit.facing !== undefined
+        ? 90 + directionAngle(unit.facing)
+        : unit.team === 'player'
+        ? 0
+        : 180;
+  }
+
+  const symbol = (isGambit ? GAMBIT_SYMBOL_PATH : SYMBOL_PATH)[unit.rank];
+  const transform = `scale(${scale})${rotation ? ` rotate(${rotation})` : ''}`;
   const teamColor = TEAM_FILL[unit.team];
 
   return (
@@ -81,6 +111,7 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
               stroke={OUTLINE}
               strokeWidth={4.4 / scale}
               strokeLinejoin="round"
+              fillRule="evenodd"
             />
             <path
               d={symbol}
@@ -88,6 +119,7 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
               stroke={teamColor}
               strokeWidth={1.8 / scale}
               strokeLinejoin="round"
+              fillRule="evenodd"
             />
           </>
         ) : (
@@ -97,6 +129,7 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
             stroke={OUTLINE}
             strokeWidth={2.4 / scale}
             strokeLinejoin="round"
+            fillRule="evenodd"
             paintOrder="stroke"
           />
         )}

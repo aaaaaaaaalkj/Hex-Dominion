@@ -5,8 +5,9 @@ import {
   calculateLegalMovesForUnit,
   getUnitSpeed,
 } from './gameRules';
-import { coordKey, getHexNeighbors, hexDistance } from './hexMath';
-import { GameAction, GameState, applyAction, getActions } from './gameState';
+import { HEX_DIAGONALS, HEX_DIRECTIONS, coordKey, getHexNeighbors, hexDistance } from './hexMath';
+import { GameAction, GameState, applyAction, getActions, isGameOver } from './gameState';
+import { calculateGambitMoves, isKingInCheck } from './gambitRules';
 
 /**
  * Search-based opponent.
@@ -20,8 +21,9 @@ import { GameAction, GameState, applyAction, getActions } from './gameState';
  *   never falls in the middle of an exchange.
  * - Below the root only the most promising quiet moves are searched (all
  *   captures always are), which buys extra depth.
- * - The evaluation is generic: material, tiles under influence and the safety
- *   margin of each King.
+ * - The evaluation is generic per mode. Dominion: material, tiles under influence
+ *   and the safety margin of each King. Gambit: material, activity of the long-range
+ *   pieces, Scout advancement and King shelter.
  */
 
 export interface SearchOptions {
@@ -43,6 +45,12 @@ export interface SearchResult {
 
 const WIN_SCORE = 1_000_000;
 const PIECE_VALUE: Record<UnitRank, number> = { 1: 100, 2: 180, 3: 260, 4: 0 }; // King loss is terminal
+// Gambit: Scout, Bishop, Rook (the King is never captured: checkmate is terminal)
+const GAMBIT_PIECE_VALUE: Record<UnitRank, number> = { 1: 150, 2: 320, 3: 480, 4: 0 };
+const GAMBIT_MOBILITY_VALUE = 5; // per open tile on a Rook/Bishop line
+const GAMBIT_SCOUT_ADVANCE_VALUE = 6; // per row advanced toward the enemy
+const GAMBIT_KING_SHELTER_VALUE = 12; // per friendly piece next to the King
+const GAMBIT_CHECK_PENALTY = 40;
 const TILE_CONTROL_VALUE = 12;
 const KING_SAFETY_VALUE = 20;
 const KING_SAFETY_CAP = 6;
@@ -61,7 +69,10 @@ class SearchTimeout extends Error {}
 export function isQuietPosition(state: GameState, tiles: Map<string, HexTile>): boolean {
   for (const unit of state.units) {
     if (unit.isDefeated) continue;
-    const moves = calculateLegalMovesForUnit({ ...unit, hasMovedThisRound: false }, tiles, state.units);
+    const moves =
+      state.mode === 'gambit'
+        ? calculateGambitMoves(unit, tiles, state.units)
+        : calculateLegalMovesForUnit({ ...unit, hasMovedThisRound: false }, tiles, state.units);
     if (moves.some((m) => m.isAttack)) return false;
   }
   return true;
@@ -127,8 +138,55 @@ export function chooseAIAction(
     return Math.max(-KING_SAFETY_CAP, Math.min(KING_SAFETY_CAP, defense - strongestAttack));
   };
 
+  const occupiedKeys = (units: Unit[]) =>
+    new Set(units.filter((u) => !u.isDefeated).map((u) => coordKey(u.coord)));
+
+  // Gambit evaluation: material, open lines of Rooks/Bishops, Scout advancement, King shelter
+  const evaluateGambit = (s: GameState): number => {
+    const occupied = occupiedKeys(s.units);
+    let score = 0;
+    for (const u of s.units) {
+      if (u.isDefeated) continue;
+      const side = u.team === me ? 1 : -1;
+      score += side * GAMBIT_PIECE_VALUE[u.rank];
+
+      if (u.rank === 3 || u.rank === 2) {
+        let open = 0;
+        for (const dir of u.rank === 3 ? HEX_DIRECTIONS : HEX_DIAGONALS) {
+          let c = u.coord;
+          for (;;) {
+            c = { q: c.q + dir.q, r: c.r + dir.r };
+            const key = coordKey(c);
+            if (!board.index.has(key)) break;
+            open++;
+            if (occupied.has(key)) break;
+          }
+        }
+        score += side * open * GAMBIT_MOBILITY_VALUE;
+      } else if (u.rank === 1) {
+        // Player advances toward negative r, AI toward positive r
+        const advanced = u.team === 'player' ? 4 - u.coord.r : u.coord.r + 4;
+        score += side * advanced * GAMBIT_SCOUT_ADVANCE_VALUE;
+      } else {
+        let shelter = 0;
+        for (const n of getHexNeighbors(u.coord)) {
+          if (s.units.some((f) => !f.isDefeated && f.team === u.team && f.coord.q === n.q && f.coord.r === n.r)) {
+            shelter++;
+          }
+        }
+        score += side * shelter * GAMBIT_KING_SHELTER_VALUE;
+      }
+    }
+    if (isKingInCheck(s.currentTurn, tiles, s.units)) {
+      score += (s.currentTurn === me ? -1 : 1) * GAMBIT_CHECK_PENALTY;
+    }
+    return score;
+  };
+
   const evaluate = (s: GameState, ply: number): number => {
     if (s.winner) return s.winner === me ? WIN_SCORE - ply : -WIN_SCORE + ply;
+    if (s.isDraw) return 0;
+    if (s.mode === 'gambit') return evaluateGambit(s);
 
     const influence = new Float64Array(board.size);
     let score = 0;
@@ -178,8 +236,14 @@ export function chooseAIAction(
         const { move } = action;
         const unit = unitById.get(action.unitId)!;
         if (move.isAttack) {
-          const victimValue = move.targetUnitRank === 4 ? 1e5 : PIECE_VALUE[move.targetUnitRank!];
+          const values = s.mode === 'gambit' ? GAMBIT_PIECE_VALUE : PIECE_VALUE;
+          const victimValue = move.targetUnitRank === 4 ? 1e5 : values[move.targetUnitRank!];
           return { action, key: 1e6 + victimValue - unit.rank };
+        }
+        if (s.mode === 'gambit') {
+          // Prefer centralizing quiet moves
+          const center = { q: 0, r: 0 };
+          return { action, key: hexDistance(unit.coord, center) - hexDistance(move.target, center) };
         }
         const from = board.area[board.index.get(coordKey(unit.coord))!];
         const to = board.area[board.index.get(coordKey(move.target))!];
@@ -205,7 +269,7 @@ export function chooseAIAction(
   const quiesce = (s: GameState, alpha: number, beta: number, ply: number, qDepth: number): number => {
     tick();
     const standPat = evaluate(s, ply);
-    if (s.winner || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
+    if (isGameOver(s) || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
 
     const maximizing = s.currentTurn === me;
     if (maximizing) {
@@ -236,11 +300,12 @@ export function chooseAIAction(
   };
 
   const search = (s: GameState, depth: number, alpha: number, beta: number, ply: number): number => {
-    if (s.winner) return evaluate(s, ply);
+    if (isGameOver(s)) return evaluate(s, ply);
     if (depth <= 0) return quiesce(s, alpha, beta, ply, 0);
     tick();
 
     let ordered = orderActions(s, getActions(s, tiles));
+    if (ordered.length === 0) return evaluate(s, ply);
     if (ordered.length > INNER_BEAM_WIDTH) {
       const captures = ordered.filter((o) => o.action.kind === 'move' && o.action.move.isAttack);
       const quiet = ordered.filter((o) => !(o.action.kind === 'move' && o.action.move.isAttack));
