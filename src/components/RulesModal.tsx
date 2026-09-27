@@ -72,9 +72,9 @@ const GambitRules: React.FC = () => (
         <li className="flex items-start gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
           <span>
-            <strong>Scouts:</strong> the arrow points at the edge the Scout faces. With 4 points per move, a step
-            forward or a 60° turn costs 1 point, so a Scout can advance, turn and advance again, or just turn in
-            place. When a tile can be reached with different facings, choose the final facing from the arrows shown.
+            <strong>Scouts:</strong> the arrow points at the edge the Scout faces. With 3 points per move, a step
+            forward costs 1 point and a 60° turn costs 2, so a Scout can advance up to 3 tiles, turn once and
+            step once (in either order), or just turn in place. When a tile can be reached with different facings, choose the final facing from the arrows shown.
           </span>
         </li>
       </ul>

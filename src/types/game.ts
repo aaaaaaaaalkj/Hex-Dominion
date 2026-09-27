@@ -76,7 +76,7 @@ export const GAMBIT_PIECES: Record<UnitRank, GambitPieceDefinition> = {
   2: { name: 'Bishop', description: 'Slides any distance through hex corners (6 directions), always staying on its tile color.' },
   1: {
     name: 'Scout',
-    description: 'Faces one edge. 4 points per move: a step forward or a 60° turn costs 1. Captures by stepping forward.',
+    description: 'Faces one edge. 3 points per move: a step forward costs 1, a 60° turn costs 2. Captures by stepping forward.',
   },
 };
 

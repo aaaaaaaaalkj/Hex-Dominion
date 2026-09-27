@@ -6,12 +6,14 @@ import { HEX_DIAGONALS, HEX_DIRECTIONS, coordKey, hexDistance } from './hexMath'
  * - King: 1 hex in any of the 6 edge directions
  * - Rook: slides any distance along the 6 edge directions
  * - Bishop: slides any distance along the 6 corner (diagonal) directions
- * - Scout: faces an edge; 4 points per move, a step forward or a 60° turn costs 1;
+ * - Scout: faces an edge; 3 points per move, a step forward costs 1, a 60° turn costs 2;
  *   captures by stepping forward onto an enemy (ends the move)
  * Nothing jumps. A move may not leave the mover's own King in check.
  */
 
-export const SCOUT_MOVE_POINTS = 4;
+export const SCOUT_MOVE_POINTS = 3;
+export const SCOUT_STEP_COST = 1;
+export const SCOUT_TURN_COST = 2;
 
 type Occupancy = Map<string, Unit>;
 
@@ -65,38 +67,45 @@ function slidingMoves(
  */
 function scoutMoves(unit: Unit, tiles: Map<string, HexTile>, occupancy: Occupancy): LegalMove[] {
   const startFacing = unit.facing ?? 0;
+  type ScoutState = { coord: HexCoord; facing: number; path: HexCoord[]; cost: number };
   const stateKey = (c: HexCoord, f: number) => `${c.q},${c.r},${f}`;
-  const seen = new Set<string>([stateKey(unit.coord, startFacing)]);
-  const moves: LegalMove[] = [];
-  const captureKeys = new Set<string>();
 
-  let frontier: { coord: HexCoord; facing: number; path: HexCoord[] }[] = [
-    { coord: unit.coord, facing: startFacing, path: [] },
-  ];
+  // Cheapest way to reach each (position, facing); explored in order of points spent
+  const best = new Map<string, ScoutState>();
+  const buckets: ScoutState[][] = Array.from({ length: SCOUT_MOVE_POINTS + 1 }, () => []);
+  const start: ScoutState = { coord: unit.coord, facing: startFacing, path: [], cost: 0 };
+  best.set(stateKey(unit.coord, startFacing), start);
+  buckets[0].push(start);
 
-  for (let points = 0; points < SCOUT_MOVE_POINTS; points++) {
-    const next: typeof frontier = [];
-    for (const s of frontier) {
+  const reach = (state: ScoutState) => {
+    if (state.cost > SCOUT_MOVE_POINTS) return;
+    const key = stateKey(state.coord, state.facing);
+    const known = best.get(key);
+    if (known && known.cost <= state.cost) return;
+    best.set(key, state);
+    buckets[state.cost].push(state);
+  };
+
+  const captures = new Map<string, LegalMove>();
+  for (let points = 0; points <= SCOUT_MOVE_POINTS; points++) {
+    for (const s of buckets[points]) {
+      if (best.get(stateKey(s.coord, s.facing)) !== s) continue; // superseded by a cheaper route
+
       // Turn 60° left or right
       for (const turn of [1, 5]) {
-        const facing = (s.facing + turn) % 6;
-        const key = stateKey(s.coord, facing);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        next.push({ coord: s.coord, facing, path: s.path });
-        moves.push({ target: s.coord, path: s.path, isAttack: false, facing });
+        reach({ coord: s.coord, facing: (s.facing + turn) % 6, path: s.path, cost: points + SCOUT_TURN_COST });
       }
 
-      // Step forward
+      // Step forward (captures an enemy in the way, which ends the move)
+      if (points + SCOUT_STEP_COST > SCOUT_MOVE_POINTS) continue;
       const ahead = add(s.coord, HEX_DIRECTIONS[s.facing]);
       const aheadKey = coordKey(ahead);
       if (!tiles.has(aheadKey)) continue;
       const occupant = occupancy.get(aheadKey);
       if (occupant) {
         const captureKey = stateKey(ahead, s.facing);
-        if (occupant.team !== unit.team && !captureKeys.has(captureKey)) {
-          captureKeys.add(captureKey);
-          moves.push({
+        if (occupant.team !== unit.team && !captures.has(captureKey)) {
+          captures.set(captureKey, {
             target: ahead,
             path: [...s.path, ahead],
             isAttack: true,
@@ -107,20 +116,17 @@ function scoutMoves(unit: Unit, tiles: Map<string, HexTile>, occupancy: Occupanc
         }
         continue;
       }
-      const key = stateKey(ahead, s.facing);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const path = [...s.path, ahead];
-      next.push({ coord: ahead, facing: s.facing, path });
-      moves.push({ target: ahead, path, isAttack: false, facing: s.facing });
+      reach({ coord: ahead, facing: s.facing, path: [...s.path, ahead], cost: points + SCOUT_STEP_COST });
     }
-    frontier = next;
   }
 
-  // Ending on the start tile with the start facing is not a move
-  return moves.filter(
-    (m) => !(m.target.q === unit.coord.q && m.target.r === unit.coord.r && m.facing === startFacing)
-  );
+  // Every reached state except the start is a move (turning in place included)
+  const moves: LegalMove[] = [];
+  for (const state of best.values()) {
+    if (state === start) continue;
+    moves.push({ target: state.coord, path: state.path, isAttack: false, facing: state.facing });
+  }
+  return [...moves, ...captures.values()];
 }
 
 function pseudoLegalMoves(unit: Unit, tiles: Map<string, HexTile>, occupancy: Occupancy): LegalMove[] {
