@@ -72,8 +72,14 @@ export interface GambitPieceDefinition {
 
 export const GAMBIT_PIECES: Record<UnitRank, GambitPieceDefinition> = {
   4: { name: 'King', description: 'Moves 1 hex in any of the 6 directions. Checkmate it to win.' },
-  3: { name: 'Rook', description: 'Slides any distance across hex edges (6 directions).' },
-  2: { name: 'Bishop', description: 'Slides any distance through hex corners (6 directions), always staying on its tile color.' },
+  3: {
+    name: 'Rook',
+    description: 'Slides any distance across hex edges (6 directions), but captures only horizontally (E/W).',
+  },
+  2: {
+    name: 'Bishop',
+    description: 'Slides and captures any distance through the upper and lower edges (NE, NW, SW, SE), never horizontally.',
+  },
   1: {
     name: 'Scout',
     description: 'Faces one edge. 3 points per move: a step forward costs 1, a 60° turn costs 2. Captures by stepping forward.',

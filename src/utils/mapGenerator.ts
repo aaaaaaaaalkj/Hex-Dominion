@@ -115,7 +115,7 @@ export function generateGameMap(mode: GameMode = 'dominion'): GeneratedMap {
 
 /**
  * Gambit setup: the King swaps places with the central back-row piece (a Bishop
- * in Gambit), which keeps the three Bishops on three different tile colors.
+ * in Gambit), moving the King behind its lines.
  * Scouts face the enemy through one of the two forward edges, outer pairs turned
  * toward the center.
  */

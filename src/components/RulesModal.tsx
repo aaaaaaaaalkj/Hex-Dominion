@@ -65,8 +65,10 @@ const GambitRules: React.FC = () => (
         <li className="flex items-start gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
           <span>
-            <strong>Three tile colors:</strong> like the two colors of a chess board. Bishops move through hex
-            corners and never leave their color, so each army has one Bishop per color.
+            <strong>Rooks and Bishops:</strong> Rooks move along all 6 edge directions but capture only along
+            their horizontal line (E/W); in the other directions an enemy piece simply blocks them. Bishops move and
+            capture through the upper and lower edges (NE, NW, SW, SE) but never horizontally. The three tile
+            colors help to read the lines.
           </span>
         </li>
         <li className="flex items-start gap-2">

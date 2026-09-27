@@ -10,17 +10,6 @@ export const HEX_DIRECTIONS: readonly HexCoord[] = [
   { q: 0, r: 1 },
 ] as const;
 
-// Diagonal directions through hex corners (used by Gambit Bishops); each one is
-// the sum of two adjacent edge directions and keeps the tile's 3-coloring
-export const HEX_DIAGONALS: readonly HexCoord[] = [
-  { q: 2, r: -1 },
-  { q: 1, r: -2 },
-  { q: -1, r: -1 },
-  { q: -2, r: 1 },
-  { q: -1, r: 2 },
-  { q: 1, r: 1 },
-] as const;
-
 // Compass names of the edge directions (screen orientation, pointy-top hexes)
 export const DIRECTION_NAMES = ['E', 'NE', 'NW', 'W', 'SW', 'SE'] as const;
 
@@ -29,7 +18,7 @@ export function directionAngle(i: number): number {
   return -60 * i;
 }
 
-// 3-coloring of the hex grid: neighbours always differ, diagonals keep the color
+// 3-coloring of the hex grid (Gambit board): neighbours always differ
 export function tileColorIndex(coord: HexCoord): number {
   return (((coord.q - coord.r) % 3) + 3) % 3;
 }
