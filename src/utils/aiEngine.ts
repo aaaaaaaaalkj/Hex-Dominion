@@ -1,5 +1,10 @@
 import { HexTile, Unit, UnitRank } from '../types/game';
-import { calculateAttackRank, calculateDefensiveRank, getUnitSpeed } from './gameRules';
+import {
+  calculateAttackRank,
+  calculateDefensiveRank,
+  calculateLegalMovesForUnit,
+  getUnitSpeed,
+} from './gameRules';
 import { coordKey, getHexNeighbors, hexDistance } from './hexMath';
 import { GameAction, GameState, applyAction, getActions } from './gameState';
 
@@ -21,7 +26,11 @@ import { GameAction, GameState, applyAction, getActions } from './gameState';
 
 export interface SearchOptions {
   timeLimitMs?: number;
+  // Shorter budget used when no unit of either side can capture anything (e.g. the opening)
+  quietTimeLimitMs?: number;
   maxDepth?: number;
+  // Pick randomly among root moves scoring within this many points of the best (0 = deterministic)
+  randomMargin?: number;
 }
 
 export interface SearchResult {
@@ -44,6 +53,19 @@ const DEFAULT_TIME_LIMIT_MS = 1200;
 const DEFAULT_MAX_DEPTH = 8;
 
 class SearchTimeout extends Error {}
+
+/**
+ * True when no unit of either side (ignoring who has moved this round) can capture
+ * anything right now, i.e. the armies are not in contact.
+ */
+export function isQuietPosition(state: GameState, tiles: Map<string, HexTile>): boolean {
+  for (const unit of state.units) {
+    if (unit.isDefeated) continue;
+    const moves = calculateLegalMovesForUnit({ ...unit, hasMovedThisRound: false }, tiles, state.units);
+    if (moves.some((m) => m.isAttack)) return false;
+  }
+  return true;
+}
 
 // Precomputed tile indices: area[i] = tile i plus its on-board neighbours
 interface BoardIndex {
@@ -73,8 +95,13 @@ export function chooseAIAction(
   options: SearchOptions = {}
 ): SearchResult | null {
   const started = performance.now();
-  const deadline = started + (options.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS);
+  const timeLimit =
+    options.quietTimeLimitMs !== undefined && isQuietPosition(state, tiles)
+      ? options.quietTimeLimitMs
+      : options.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS;
+  const deadline = started + timeLimit;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const randomMargin = options.randomMargin ?? 0;
   const me = state.currentTurn;
   const board = buildBoardIndex(tiles);
   let nodes = 0;
@@ -239,40 +266,50 @@ export function chooseAIAction(
   // ---------- Iterative deepening at the root ----------
 
   let root = orderActions(state, rootActions).map((o) => ({ action: o.action, score: -Infinity }));
-  let bestAction = root[0].action;
+  // Root moves with exact scores from the deepest (possibly partial) iteration
+  let scored: { action: GameAction; score: number }[] = [{ action: root[0].action, score: 0 }];
   let bestScore = -Infinity;
   let reachedDepth = 0;
 
   for (let depth = 1; depth <= maxDepth; depth++) {
     let alpha = -Infinity;
-    let iterationBest: { action: GameAction; score: number } | null = null;
+    const iteration: { action: GameAction; score: number }[] = [];
+    let timedOut = false;
     try {
       for (const entry of root) {
-        entry.score = search(applyAction(state, tiles, entry.action), depth - 1, alpha, Infinity, 1);
-        if (!iterationBest || entry.score > iterationBest.score) {
-          iterationBest = { action: entry.action, score: entry.score };
-        }
+        // Widen the window by the random margin so near-best moves get exact scores
+        entry.score = search(
+          applyAction(state, tiles, entry.action),
+          depth - 1,
+          alpha - randomMargin,
+          Infinity,
+          1
+        );
+        iteration.push({ action: entry.action, score: entry.score });
         alpha = Math.max(alpha, entry.score);
       }
     } catch (e) {
       if (!(e instanceof SearchTimeout)) throw e;
-      // A partially searched iteration is still usable: the previous best move is
-      // searched first, and any move that beat it has an exact score.
-      if (iterationBest) {
-        bestAction = iterationBest.action;
-        bestScore = iterationBest.score;
-        reachedDepth = depth;
-      }
-      break;
+      timedOut = true;
     }
 
-    bestAction = iterationBest!.action;
-    bestScore = iterationBest!.score;
-    reachedDepth = depth;
-    root = [...root].sort((a, b) => b.score - a.score);
+    // A partially searched iteration is still usable: the previous best move is
+    // searched first, and any move that beat it has an exact score.
+    if (iteration.length > 0) {
+      scored = iteration;
+      bestScore = Math.max(...iteration.map((m) => m.score));
+      reachedDepth = depth;
+    }
+    if (timedOut) break;
 
+    root = [...root].sort((a, b) => b.score - a.score);
     if (Math.abs(bestScore) > WIN_SCORE / 2) break; // forced result found
   }
+
+  // Vary play: choose randomly among near-best moves, unless the result is forced
+  const margin = Math.abs(bestScore) > WIN_SCORE / 2 ? 0 : randomMargin;
+  const candidates = scored.filter((m) => m.score >= bestScore - margin);
+  const bestAction = candidates[Math.floor(Math.random() * candidates.length)].action;
 
   return {
     action: bestAction,

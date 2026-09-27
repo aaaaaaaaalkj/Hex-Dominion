@@ -70,8 +70,11 @@ export default function App() {
   const [showAuras, setShowAuras] = useState<boolean>(false);
   const [showLastMove, setShowLastMove] = useState<boolean>(true);
 
-  // AI search budget per move, and a minimum delay so instant replies don't feel abrupt
+  // AI search budget per move (shorter while no captures are possible), variety margin,
+  // and a minimum delay so instant replies don't feel abrupt
   const AI_TIME_LIMIT_MS = 1200;
+  const AI_QUIET_TIME_LIMIT_MS = 300;
+  const AI_RANDOM_MARGIN = 8;
   const AI_MIN_THINK_MS = 300;
 
   // State refs to ensure AI effect reads latest state without cancelling timers
@@ -404,7 +407,11 @@ export default function App() {
         winner: null,
       },
       tiles: tilesRef.current,
-      options: { timeLimitMs: AI_TIME_LIMIT_MS },
+      options: {
+        timeLimitMs: AI_TIME_LIMIT_MS,
+        quietTimeLimitMs: AI_QUIET_TIME_LIMIT_MS,
+        randomMargin: AI_RANDOM_MARGIN,
+      },
     };
     worker.postMessage(request);
 
