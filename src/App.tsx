@@ -17,6 +17,8 @@ import {
   calculateLegalMovesForUnit,
   applyMove,
   hasAnyLegalMoves,
+  computeInfluenceMap,
+  countInfluencedTiles,
 } from './utils/gameRules';
 import { chooseAIMove } from './utils/aiEngine';
 import { soundEffects } from './utils/soundEffects';
@@ -188,25 +190,20 @@ export default function App() {
     (unit: Unit, move: LegalMove) => {
       const fromCoord = { ...unit.coord };
       const {
-        newTiles,
         newUnits,
         capturedUnit,
-        territoryClaimed,
         isGameOver,
         winner: gameWinner,
-      } = applyMove(unit.id, move, tiles, units);
+      } = applyMove(unit.id, move, units);
 
       if (capturedUnit) {
         soundEffects.playAttack();
-      } else if (territoryClaimed) {
-        soundEffects.playTerritoryFlip();
       } else {
         soundEffects.playMove();
       }
 
       const nextMoveCount = moveCount + 1;
       setMoveCount(nextMoveCount);
-      setTiles(newTiles);
       setUnits(newUnits);
       setSelectedUnit(null);
       setLegalMoves([]);
@@ -228,7 +225,6 @@ export default function App() {
         defenseRank: move.defenseRank,
         capturedRank: capturedUnit ? capturedUnit.rank : undefined,
         capturedName: capturedUnit ? UNIT_DEFINITIONS[capturedUnit.rank].name : undefined,
-        territoryClaimed,
         isWinningMove: isGameOver,
         timestamp: Date.now(),
       };
@@ -245,7 +241,7 @@ export default function App() {
           soundEffects.playDefeat();
         }
       } else {
-        evaluateNextTurn(unit.team, newTiles, newUnits);
+        evaluateNextTurn(unit.team, tiles, newUnits);
       }
     },
     [tiles, units, roundNumber, moveCount, evaluateNextTurn]
@@ -278,7 +274,6 @@ export default function App() {
         to: { ...unit.coord },
         path: [unit.coord],
         isAttack: false,
-        territoryClaimed: false,
         isWinningMove: false,
         timestamp: Date.now(),
       };
@@ -363,7 +358,6 @@ export default function App() {
         to: { ...firstUnit.coord },
         path: [firstUnit.coord],
         isAttack: false,
-        territoryClaimed: false,
         isWinningMove: false,
         timestamp: Date.now(),
       };
@@ -417,14 +411,10 @@ export default function App() {
 
   // Statistics & Score tracking
   const stats = useMemo(() => {
-    let playerTiles = 0;
-    let aiTiles = 0;
     const totalTiles = tiles.size || 1;
-
-    for (const t of tiles.values()) {
-      if (t.controlledBy === 'player') playerTiles++;
-      if (t.controlledBy === 'ai') aiTiles++;
-    }
+    const { player: playerTiles, ai: aiTiles } = countInfluencedTiles(
+      computeInfluenceMap(tiles, units)
+    );
 
     const playerDefeats = units.filter((u) => u.team === 'player' && u.isDefeated).length;
     const aiDefeats = units.filter((u) => u.team === 'ai' && u.isDefeated).length;
@@ -435,8 +425,8 @@ export default function App() {
     return {
       playerTiles,
       aiTiles,
-      playerTerritoryPct: Math.round((playerTiles / totalTiles) * 100),
-      aiTerritoryPct: Math.round((aiTiles / totalTiles) * 100),
+      playerInfluencePct: Math.round((playerTiles / totalTiles) * 100),
+      aiInfluencePct: Math.round((aiTiles / totalTiles) * 100),
       playerDefeats,
       aiDefeats,
       playerSovereignAlive,
@@ -450,8 +440,8 @@ export default function App() {
       winner,
       roundNumber,
       totalMoves: moveCount,
-      playerTerritoryPct: stats.playerTerritoryPct,
-      aiTerritoryPct: stats.aiTerritoryPct,
+      playerInfluencePct: stats.playerInfluencePct,
+      aiInfluencePct: stats.aiInfluencePct,
       playerDefeats: stats.playerDefeats,
       aiDefeats: stats.aiDefeats,
       tiles,
@@ -465,8 +455,8 @@ export default function App() {
       winner,
       roundNumber,
       totalMoves: moveCount,
-      playerTerritoryPct: stats.playerTerritoryPct,
-      aiTerritoryPct: stats.aiTerritoryPct,
+      playerInfluencePct: stats.playerInfluencePct,
+      aiInfluencePct: stats.aiInfluencePct,
       playerDefeats: stats.playerDefeats,
       aiDefeats: stats.aiDefeats,
       tiles,
@@ -588,26 +578,26 @@ export default function App() {
         </button>
       </div>
 
-      {/* 3. TOP CENTER TERRITORY RATIO BAR */}
+      {/* 3. TOP CENTER INFLUENCE RATIO BAR */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-md text-[11px] font-mono tabular-nums shadow-lg pointer-events-none">
         <div className="flex items-center gap-1.5 text-cyan-400">
           <Crown className="w-3.5 h-3.5" />
-          <span>{stats.playerTerritoryPct}%</span>
+          <span>{stats.playerInfluencePct}%</span>
         </div>
 
         <div className="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
           <div
-            style={{ width: `${stats.playerTerritoryPct}%` }}
+            style={{ width: `${stats.playerInfluencePct}%` }}
             className="bg-cyan-500 transition-all duration-300"
           />
           <div
-            style={{ width: `${stats.aiTerritoryPct}%` }}
+            style={{ width: `${stats.aiInfluencePct}%` }}
             className="bg-rose-500 transition-all duration-300 ml-auto"
           />
         </div>
 
         <div className="flex items-center gap-1.5 text-rose-400">
-          <span>{stats.aiTerritoryPct}%</span>
+          <span>{stats.aiInfluencePct}%</span>
           <Crown className="w-3.5 h-3.5" />
         </div>
       </div>
@@ -702,8 +692,8 @@ export default function App() {
           winner={winner}
           roundNumber={roundNumber}
           totalMoves={moveCount}
-          playerTerritoryPct={stats.playerTerritoryPct}
-          aiTerritoryPct={stats.aiTerritoryPct}
+          playerInfluencePct={stats.playerInfluencePct}
+          aiInfluencePct={stats.aiInfluencePct}
           playerDefeats={stats.playerDefeats}
           aiDefeats={stats.aiDefeats}
           lastMove={lastMove}

@@ -20,7 +20,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               Codex of War: Rules of Engagement
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Hex territory warfare, aura defense, and initiative doctrine
+              Hex influence warfare, aura support, and initiative doctrine
             </p>
           </div>
           <button
@@ -62,7 +62,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                     <span className="text-[10px] font-mono text-amber-400">1 Unit · Speed 1 · Aura 3</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Supreme Commander. Moves 1 tile. Projects a Level 3 aura (+3 combat support and territory protection). Defeat brings instant victory.
+                    Supreme Commander. Moves 1 tile. Projects a Level 3 aura (+3 combat support). Defeat brings instant victory.
                   </p>
                 </div>
               </div>
@@ -78,7 +78,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                     <span className="text-[10px] font-mono text-emerald-400">2 Units · Speed 2 · Aura 2</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Heavy bastion. Moves 2 tiles. Projects a Level 2 aura (+2 combat support and shields territory against rank 1 and 2 units).
+                    Heavy bastion. Moves 2 tiles. Projects a Level 2 aura (+2 combat support).
                   </p>
                 </div>
               </div>
@@ -94,7 +94,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                     <span className="text-[10px] font-mono text-sky-400">3 Units · Speed 3 · Aura 1</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Tactical skirmisher. Moves 3 tiles. Projects a Level 1 aura (+1 combat support, denies territory to enemy scouts).
+                    Tactical skirmisher. Moves 3 tiles. Projects a Level 1 aura (+1 combat support).
                   </p>
                 </div>
               </div>
@@ -110,7 +110,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                     <span className="text-[10px] font-mono text-slate-300">4 Units · Speed 4 · Aura 0</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Swift vanguard. Moves 4 tiles. Has no aura (aura = 0); cannot protect territory from opponent scouts and gives no combat support aura.
+                    Swift vanguard. Moves 4 tiles. Has no aura (aura = 0) and gives no combat support aura.
                   </p>
                 </div>
               </div>
@@ -120,7 +120,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
           {/* 3. Movement & Supply Doctrine */}
           <div className="space-y-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Movement & Territory Control
+              Movement & Influence
             </h3>
             <ul className="space-y-1.5 text-xs text-slate-300">
               <li className="flex items-start gap-2">
@@ -138,14 +138,14 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong>Frontier Tiles Traversal Rule:</strong> Tiles in the immediate neighborhood of team-controlled hexes can be <em>entered as the destination</em> of a move, but <strong>cannot be traversed through</strong> to reach other tiles. A move can end on a frontier tile, but cannot pass through it.
+                  <strong>Free Movement:</strong> Units may move across any empty tile within their speed. Only enemy units block the way.
                 </span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong>Unified Territory Combat Rule:</strong> Capturing empty opponent territory follows the <em>exact same rules as capturing units</em>!
-                  The empty territory itself has a base defensive rank of 0. Friendly defending neighbors project their aura (Rank - 1) to increase its defensive rank, while attacking allies neighboring the target project their aura to increase the attack rank. Capture succeeds when <strong>Attack Rank &gt; Defensive Rank</strong>.
+                  <strong>Influence:</strong> Every unit projects influence equal to its rank onto its own tile and all adjacent tiles. Blue and red influence cancel out
+                  (e.g. 7 red + 5 blue = 2 red). Tiles are shaded by the net influence: the stronger it is, the deeper the blue or red.
                 </span>
               </li>
             </ul>

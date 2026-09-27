@@ -7,14 +7,15 @@ import {
 } from '../types/game';
 import {
   calculateLegalMovesForUnit,
-  computeTeamReachSet,
+  computeInfluenceMap,
+  countInfluencedTiles,
   calculateDefensiveRank,
   calculateAttackRank,
   getUnitAuraRank,
   getUnitSpeed,
   applyMove,
 } from './gameRules';
-import { hexDistance, coordKey } from './hexMath';
+import { hexDistance } from './hexMath';
 
 export interface AIMoveChoice {
   unit: Unit;
@@ -51,9 +52,6 @@ export function chooseAIMove(
     return null;
   }
 
-  // Precompute reach set once for candidate moves
-  const aiReachSet = computeTeamReachSet('ai', tiles);
-
   const playerUnits = units.filter((u) => u.team === 'player' && !u.isDefeated);
   const friendlyUnits = units.filter((u) => u.team === 'ai' && !u.isDefeated);
 
@@ -71,12 +69,7 @@ export function chooseAIMove(
   const allPossibleMoves: AIMoveChoice[] = [];
 
   for (const unit of candidateUnits) {
-    const legalMoves = calculateLegalMovesForUnit(
-      unit,
-      tiles,
-      units,
-      aiReachSet
-    );
+    const legalMoves = calculateLegalMovesForUnit(unit, tiles, units);
 
     for (const move of legalMoves) {
       const evaluation = evaluateGrandmasterMove(
@@ -135,12 +128,7 @@ function evaluateGrandmasterMove(
   }
 
   // 2. SIMULATE BOARD AFTER THIS MOVE
-  const { newTiles: simTiles, newUnits: simUnits } = applyMove(
-    unit.id,
-    move,
-    tiles,
-    units
-  );
+  const { newUnits: simUnits } = applyMove(unit.id, move, units);
 
   const simAiSovereign = simUnits.find(
     (u) => u.team === 'ai' && u.rank === 4 && !u.isDefeated
@@ -167,7 +155,7 @@ function evaluateGrandmasterMove(
 
     const playerMoves = calculateLegalMovesForUnit(
       testPlayerUnit,
-      simTiles,
+      tiles,
       simUnits
     );
 
@@ -199,7 +187,7 @@ function evaluateGrandmasterMove(
     // Highly reward staying surrounded by bodyguards (each guard adds to defensive rank!)
     score += (aiSovereignDefRank - 4) * 4000;
 
-    // Discourage reckless overextension into player territory if undefended
+    // Discourage reckless overextension into the player's half if undefended
     if (aiSovereignDefRank <= 4 && move.target.r >= 0) {
       score -= 50000;
     }
@@ -261,23 +249,15 @@ function evaluateGrandmasterMove(
 
   // 9. SCOUT (L1) FRONTLINE EXPANSION
   if (unit.rank === 1) {
-    if (move.flipsControl) score += 400;
     score += move.target.r * 60;
   }
 
-  // 10. TERRITORY FLIPPING & BREACHING
-  const targetTile = tiles.get(coordKey(move.target));
-  if (targetTile) {
-    if (targetTile.controlledBy === 'player') {
-      score += 450;
-      if (move.defenseRank !== undefined && move.defenseRank > 0) {
-        score += move.defenseRank * 250; // Extra reward for breaking defended territory
-        explanation = `Breach enemy territory (ATK ${move.attackRank} vs DEF ${move.defenseRank})`;
-      }
-    } else if (targetTile.controlledBy === null) {
-      score += 200;
-    }
-  }
+  // 10. INFLUENCE CONTROL
+  // Reward moves that increase the number of tiles under net AI influence
+  const before = countInfluencedTiles(computeInfluenceMap(tiles, units));
+  const after = countInfluencedTiles(computeInfluenceMap(tiles, simUnits));
+  const influenceGain = (after.ai - after.player) - (before.ai - before.player);
+  score += influenceGain * 150;
 
   return { score, explanation };
 }

@@ -28,7 +28,7 @@ export const UNIT_DEFINITIONS: Record<UnitRank, UnitDefinition> = {
     speed: 2,
     name: 'Sentinel',
     title: 'Elite Guardian',
-    description: 'Heavy armor bastion. Moves 2 tiles. Projects a Level 2 aura, shielding adjacent territory and providing +2 combat support.',
+    description: 'Heavy armor bastion. Moves 2 tiles. Projects a Level 2 aura providing +2 combat support to adjacent allies.',
     count: 2,
   },
   2: {
@@ -37,7 +37,7 @@ export const UNIT_DEFINITIONS: Record<UnitRank, UnitDefinition> = {
     speed: 3,
     name: 'Warden',
     title: 'Frontline Striker',
-    description: 'Tactical skirmisher. Moves 3 tiles. Projects a Level 1 aura, denying territory to enemy scouts and providing +1 combat support.',
+    description: 'Tactical skirmisher. Moves 3 tiles. Projects a Level 1 aura providing +1 combat support to adjacent allies.',
     count: 3,
   },
   1: {
@@ -45,8 +45,8 @@ export const UNIT_DEFINITIONS: Record<UnitRank, UnitDefinition> = {
     auraRank: 0,
     speed: 4,
     name: 'Scout',
-    title: 'Territory Pioneer',
-    description: 'Rapid vanguard. Moves 4 tiles. Has no aura (aura = 0); cannot protect territory from enemy scouts and provides no aura support in combat.',
+    title: 'Swift Vanguard',
+    description: 'Rapid vanguard. Moves 4 tiles. Has no aura (aura = 0) and provides no aura support in combat.',
     count: 4,
   },
 };
@@ -58,7 +58,6 @@ export interface HexCoord {
 
 export interface HexTile extends HexCoord {
   id: string; // e.g., "q,r"
-  controlledBy: Team | null; // null = neutral
 }
 
 export interface Unit {
@@ -78,7 +77,6 @@ export interface LegalMove {
   targetUnitRank?: UnitRank;
   attackRank?: number;
   defenseRank?: number;
-  flipsControl: boolean;
 }
 
 export interface MoveRecord {
@@ -96,7 +94,6 @@ export interface MoveRecord {
   capturedName?: string;
   attackRank?: number;
   defenseRank?: number;
-  territoryClaimed?: boolean;
   isWinningMove?: boolean;
   timestamp: number;
 }

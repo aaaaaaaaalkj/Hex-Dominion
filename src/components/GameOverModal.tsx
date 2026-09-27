@@ -15,8 +15,8 @@ interface GameOverModalProps {
   winner: Team;
   roundNumber: number;
   totalMoves: number;
-  playerTerritoryPct: number;
-  aiTerritoryPct: number;
+  playerInfluencePct: number;
+  aiInfluencePct: number;
   playerDefeats: number;
   aiDefeats: number;
   lastMove: MoveRecord | null;
@@ -30,8 +30,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   winner,
   roundNumber,
   totalMoves,
-  playerTerritoryPct,
-  aiTerritoryPct,
+  playerInfluencePct,
+  aiInfluencePct,
   playerDefeats,
   aiDefeats,
   lastMove,
@@ -81,7 +81,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           </h2>
           <p className="text-xs text-slate-400">
             {isPlayerWinner
-              ? 'You struck down the AI Sovereign and conquered the territory!'
+              ? 'You struck down the AI Sovereign and seized control of the battlefield!'
               : 'Your Sovereign was struck down by the enemy.'}
           </p>
         </div>
@@ -139,9 +139,9 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             </span>
           </div>
           <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">Your Land</span>
+            <span className="text-[10px] text-slate-400 block">Your Influence</span>
             <span className="text-base font-bold font-mono text-cyan-400 tabular-nums">
-              {playerTerritoryPct}%
+              {playerInfluencePct}%
             </span>
           </div>
           <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">

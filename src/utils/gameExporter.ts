@@ -5,8 +5,8 @@ export interface GameExportData {
   winner: Team | null;
   roundNumber: number;
   totalMoves: number;
-  playerTerritoryPct: number;
-  aiTerritoryPct: number;
+  playerInfluencePct: number;
+  aiInfluencePct: number;
   playerDefeats: number;
   aiDefeats: number;
   tiles: Map<string, HexTile>;
@@ -19,8 +19,8 @@ export function generateGameLogText(data: GameExportData): string {
     winner,
     roundNumber,
     totalMoves,
-    playerTerritoryPct,
-    aiTerritoryPct,
+    playerInfluencePct,
+    aiInfluencePct,
     playerDefeats,
     aiDefeats,
     units,
@@ -45,7 +45,7 @@ export function generateGameLogText(data: GameExportData): string {
   lines.push(`Result:             ${resultStr}`);
   lines.push(`Rounds Fought:      ${roundNumber}`);
   lines.push(`Total Moves:        ${totalMoves}`);
-  lines.push(`Final Territory:    Player: ${playerTerritoryPct}%  |  AI: ${aiTerritoryPct}%  |  Neutral: ${Math.max(0, 100 - playerTerritoryPct - aiTerritoryPct)}%`);
+  lines.push(`Final Influence:    Player: ${playerInfluencePct}%  |  AI: ${aiInfluencePct}%  |  Neutral: ${Math.max(0, 100 - playerInfluencePct - aiInfluencePct)}%`);
   lines.push(`Casualties:         Player lost ${playerDefeats} unit(s)  |  AI lost ${aiDefeats} unit(s)`);
   lines.push('======================================================================\n');
 
@@ -70,7 +70,7 @@ export function generateGameLogText(data: GameExportData): string {
         lines.push(`Outcome:    *** FATAL STRIKE: Opponent Sovereign eliminated! GAME OVER ***`);
       }
     } else {
-      lines.push(`Action:     Maneuver ${lastMove.territoryClaimed ? '(Claimed territory)' : ''}`);
+      lines.push('Action:     Maneuver');
     }
     lines.push('----------------------------------------------------------------------\n');
   }
@@ -117,10 +117,10 @@ export function generateGameLogText(data: GameExportData): string {
         if (m.isWinningMove) {
           detail += ' *** DECISIVE BLOW ***';
         }
-      } else if (m.from.q === m.to.q && m.from.r === m.to.r && !m.territoryClaimed) {
+      } else if (m.from.q === m.to.q && m.from.r === m.to.r) {
         detail = 'Skipped turn (held position - no legal moves)';
       } else {
-        detail = m.territoryClaimed ? 'Claimed territory' : 'Moved';
+        detail = 'Moved';
       }
 
       const pathStr = m.path && m.path.length > 1

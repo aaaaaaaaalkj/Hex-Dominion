@@ -37,24 +37,47 @@ export function getUnitSpeed(rank: UnitRank): number {
 }
 
 /**
- * Precomputes the set of all hex keys reachable by team territory:
- * Units can only move on tiles controlled by their team
- * or on hexes in direct neighbourhood of those (frontier tiles).
+ * Computes the net influence on every tile.
+ * Each unit projects its rank onto the tile it stands on and onto every adjacent tile.
+ * Player (blue) influence is positive, AI (red) influence is negative, so opposing
+ * influences cancel out: 7 red + 5 blue = -2 (2 red).
  */
-export function computeTeamReachSet(
-  team: Team,
-  tiles: Map<string, HexTile>
-): Set<string> {
-  const reachSet = new Set<string>();
-  for (const tile of tiles.values()) {
-    if (tile.controlledBy === team) {
-      reachSet.add(tile.id);
-      for (const n of getHexNeighbors(tile)) {
-        reachSet.add(coordKey(n));
+export function computeInfluenceMap(
+  tiles: Map<string, HexTile>,
+  units: Unit[]
+): Map<string, number> {
+  const influence = new Map<string, number>();
+  for (const key of tiles.keys()) {
+    influence.set(key, 0);
+  }
+  for (const u of units) {
+    if (u.isDefeated) continue;
+    const value = u.team === 'player' ? u.rank : -u.rank;
+    for (const c of [u.coord, ...getHexNeighbors(u.coord)]) {
+      const key = coordKey(c);
+      const current = influence.get(key);
+      if (current !== undefined) {
+        influence.set(key, current + value);
       }
     }
   }
-  return reachSet;
+  return influence;
+}
+
+/**
+ * Counts the tiles where each team holds net influence.
+ */
+export function countInfluencedTiles(influence: Map<string, number>): {
+  player: number;
+  ai: number;
+} {
+  let player = 0;
+  let ai = 0;
+  for (const value of influence.values()) {
+    if (value > 0) player++;
+    else if (value < 0) ai++;
+  }
+  return { player, ai };
 }
 
 /**
@@ -151,45 +174,6 @@ export function getFriendlyAurasAtCoord(
 }
 
 /**
- * Calculates the total defensive rank of an empty opponent tile:
- * "capturing (empty) opponents territory should follow the same rules as capturing units.
- * Territory itself has 0 rank if it is empty. If friendly neighboring units project their aura
- * ( 1 less than rank ) then the rank is increased."
- */
-export function calculateTerritoryDefensiveRank(
-  tile: HexTile,
-  units: Unit[]
-): number {
-  if (tile.controlledBy === null) {
-    return 0; // Neutral territory has 0 rank
-  }
-  const defendingTeam = tile.controlledBy;
-  let totalDefRank = 0; // Territory itself has 0 rank if empty
-  for (const u of units) {
-    if (u.isDefeated || u.team !== defendingTeam) continue;
-    if (hexDistance(u.coord, tile) <= 1) {
-      totalDefRank += getUnitAuraRank(u.rank);
-    }
-  }
-  return totalDefRank;
-}
-
-/**
- * Calculates the maximum opponent aura rank protecting a given tile.
- * Alias for territory defense rank.
- */
-export function getTileAuraDefense(
-  team: Team,
-  tile: HexTile,
-  units: Unit[]
-): number {
-  if (tile.controlledBy === team || tile.controlledBy === null) {
-    return 0;
-  }
-  return calculateTerritoryDefensiveRank(tile, units);
-}
-
-/**
  * Calculates all legal moves for a given unit.
  *
  * Enforces:
@@ -198,28 +182,23 @@ export function getTileAuraDefense(
  *    - Level 3: 2 tiles
  *    - Level 2: 3 tiles
  *    - Level 1: 4 tiles
- * 2. Territorial Aura Protection:
- *    - Enemy tiles protected by an opponent aura require unit.rank > auraRank to enter.
- *    - Level 1 scouts have aura = 0, so territory guarded only by scouts has aura = 0 and can be captured by opponent scouts!
- * 3. Combined Rank Combat:
+ * 2. Combined Rank Combat:
  *    - Capture requires: Attack Rank > Defensive Rank.
  *    - Defender DEF = defender rank + sum of friendly neighbor auras.
  *    - Attacker ATK = attacker rank + sum of target friendly neighbor auras.
- * 4. Traversal:
- *    - Can only traverse through team-controlled tiles.
- *    - Can freely pass through tiles occupied by friendly units.
+ * 3. Traversal:
+ *    - Can freely pass through empty tiles and tiles occupied by friendly units.
+ *    - Enemy units block traversal beyond their tile.
  */
 export function calculateLegalMovesForUnit(
   unit: Unit,
   tiles: Map<string, HexTile>,
-  units: Unit[],
-  precomputedReach?: Set<string>
+  units: Unit[]
 ): LegalMove[] {
   if (unit.isDefeated || unit.hasMovedThisRound) {
     return [];
   }
 
-  const reachSet = precomputedReach ?? computeTeamReachSet(unit.team, tiles);
   const maxSteps = getUnitSpeed(unit.rank);
 
   // Fast unit position lookup
@@ -251,42 +230,20 @@ export function calculateLegalMovesForUnit(
       const nextKey = coordKey(nextCoord);
 
       // Must be a valid tile on the board
-      const nextTile = tiles.get(nextKey);
-      if (!nextTile) continue;
-
-      // Must be controlled by team or in direct neighbourhood of friendly tiles
-      if (!reachSet.has(nextKey)) continue;
+      if (!tiles.has(nextKey) || visited.has(nextKey)) continue;
 
       const occupant = unitMap.get(nextKey);
       const newPath = [...current.path, nextCoord];
       const newSteps = current.steps + 1;
 
-      // 1. Friendly unit occupant:
-      // Can pass through tiles occupied by friendly units
-      if (occupant && occupant.team === unit.team) {
-        if (!visited.has(nextKey)) {
-          visited.add(nextKey);
-          if (nextTile.controlledBy === unit.team && newSteps < maxSteps) {
-            queue.push({
-              coord: nextCoord,
-              path: newPath,
-              steps: newSteps,
-            });
-          }
-        }
-        continue;
-      }
-
-      // 2. Enemy unit occupant (Combat):
+      // 1. Enemy unit occupant (Combat):
       if (occupant && occupant.team !== unit.team) {
         // Combined Rank Evaluation:
         const defenseRank = calculateDefensiveRank(occupant, units);
         const attackRank = calculateAttackRank(unit, nextCoord, units);
 
         // Can capture if combined attack rank exceeds combined defensive rank
-        const canCapture = attackRank > defenseRank;
-
-        if (canCapture && !visited.has(nextKey)) {
+        if (attackRank > defenseRank) {
           visited.add(nextKey);
           legalMoves.push({
             target: nextCoord,
@@ -296,53 +253,29 @@ export function calculateLegalMovesForUnit(
             targetUnitRank: occupant.rank,
             attackRank,
             defenseRank,
-            flipsControl: nextTile.controlledBy !== unit.team,
           });
         }
         // Enemy blocks traversing beyond its tile
         continue;
       }
 
-      // 3. Empty hex (Territory Movement & Flipping):
-      if (!visited.has(nextKey)) {
-        const isEnemyTerritory =
-          nextTile.controlledBy !== null && nextTile.controlledBy !== unit.team;
+      visited.add(nextKey);
 
-        let canEnter = true;
-        let attackRank: number | undefined = undefined;
-        let defenseRank: number | undefined = undefined;
+      // 2. Empty hex is a valid destination (friendly-occupied hexes are pass-through only)
+      if (!occupant) {
+        legalMoves.push({
+          target: nextCoord,
+          path: newPath,
+          isAttack: false,
+        });
+      }
 
-        if (isEnemyTerritory) {
-          // "capturing (empty) opponents territory should follow the same rules as capturing units.
-          // Territory itself has 0 rank if it is empty. If friendly neighboring units project their aura
-          // ( 1 less than rank ) then the rank is increased. Opposing neighbouring units project their aura
-          // ( 1 less than their rank ) and make easier to capture opponents territory."
-          defenseRank = calculateTerritoryDefensiveRank(nextTile, units);
-          attackRank = calculateAttackRank(unit, nextCoord, units);
-          canEnter = attackRank > defenseRank;
-        }
-
-        if (canEnter) {
-          visited.add(nextKey);
-
-          legalMoves.push({
-            target: nextCoord,
-            path: newPath,
-            isAttack: false,
-            attackRank,
-            defenseRank,
-            flipsControl: nextTile.controlledBy !== unit.team,
-          });
-
-          // Can only continue traversing through if this tile is ALREADY controlled by friendly team
-          if (nextTile.controlledBy === unit.team && newSteps < maxSteps) {
-            queue.push({
-              coord: nextCoord,
-              path: newPath,
-              steps: newSteps,
-            });
-          }
-        }
+      if (newSteps < maxSteps) {
+        queue.push({
+          coord: nextCoord,
+          path: newPath,
+          steps: newSteps,
+        });
       }
     }
   }
@@ -358,11 +291,9 @@ export function hasAnyLegalMoves(
   tiles: Map<string, HexTile>,
   units: Unit[]
 ): boolean {
-  const reachSet = computeTeamReachSet(team, tiles);
-
   for (const unit of units) {
     if (unit.team === team && !unit.isDefeated && !unit.hasMovedThisRound) {
-      const moves = calculateLegalMovesForUnit(unit, tiles, units, reachSet);
+      const moves = calculateLegalMovesForUnit(unit, tiles, units);
       if (moves.length > 0) return true;
     }
   }
@@ -375,17 +306,13 @@ export function hasAnyLegalMoves(
 export function applyMove(
   unitId: string,
   move: LegalMove,
-  tiles: Map<string, HexTile>,
   units: Unit[]
 ): {
-  newTiles: Map<string, HexTile>;
   newUnits: Unit[];
   capturedUnit: Unit | null;
-  territoryClaimed: boolean;
   isGameOver: boolean;
   winner: Team | null;
 } {
-  const newTiles = new Map(tiles);
   const newUnits = units.map((u) => ({ ...u, coord: { ...u.coord } }));
 
   const unit = newUnits.find((u) => u.id === unitId);
@@ -413,20 +340,6 @@ export function applyMove(
     }
   }
 
-  const targetKey = coordKey(move.target);
-  const targetTile = newTiles.get(targetKey);
-  let territoryClaimed = false;
-
-  if (targetTile) {
-    if (targetTile.controlledBy !== unit.team) {
-      territoryClaimed = true;
-      newTiles.set(targetKey, {
-        ...targetTile,
-        controlledBy: unit.team,
-      });
-    }
-  }
-
   const enemyTeam: Team = unit.team === 'player' ? 'ai' : 'player';
   const remainingEnemies = newUnits.filter(
     (u) => u.team === enemyTeam && !u.isDefeated
@@ -437,10 +350,8 @@ export function applyMove(
   }
 
   return {
-    newTiles,
     newUnits,
     capturedUnit,
-    territoryClaimed,
     isGameOver,
     winner,
   };

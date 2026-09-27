@@ -17,9 +17,18 @@ import {
   getOpponentAurasAtCoord,
   getFriendlyAurasAtCoord,
   calculateDefensiveRank,
+  computeInfluenceMap,
 } from '../utils/gameRules';
 import { SvgUnitPiece } from './SvgUnitPiece';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+
+// Net influence at which a tile reaches its deepest shade
+const FULL_INFLUENCE = 12;
+
+const TEAM_RGB: Record<Team, string> = {
+  player: '37, 99, 235',
+  ai: '225, 29, 72',
+};
 
 interface HexBoardProps {
   tiles: Map<string, HexTile>;
@@ -128,6 +137,9 @@ export const HexBoard: React.FC<HexBoardProps> = ({
     }
     return map;
   }, [units]);
+
+  // Net influence per tile (positive = player/blue, negative = AI/red)
+  const influenceMap = useMemo(() => computeInfluenceMap(tiles, units), [tiles, units]);
 
   // Legal moves lookup map
   const moveByTarget = useMemo(() => {
@@ -243,16 +255,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
       >
         <defs>
           {/* Tile Gradients */}
-          <linearGradient id="grad-hex-player" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#1e3a8a" stopOpacity="0.8" />
-            <stop offset="100%" stopColor="#081026" stopOpacity="0.95" />
-          </linearGradient>
-
-          <linearGradient id="grad-hex-ai" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#881337" stopOpacity="0.8" />
-            <stop offset="100%" stopColor="#19040c" stopOpacity="0.95" />
-          </linearGradient>
-
           <linearGradient id="grad-hex-neutral" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#1e293b" stopOpacity="0.5" />
             <stop offset="100%" stopColor="#0b0f19" stopOpacity="0.85" />
@@ -300,18 +302,24 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               const friendlyAuras = showAuras ? getFriendlyAurasAtCoord('player', tile, units) : [];
               const hasFriendlyAura = friendlyAuras.length > 0;
 
+              // Influence shading: deeper shade = stronger net influence
+              const influence = influenceMap.get(key) ?? 0;
+              const influenceTeam: Team | null =
+                influence > 0 ? 'player' : influence < 0 ? 'ai' : null;
+              const strength = Math.min(Math.abs(influence), FULL_INFLUENCE) / FULL_INFLUENCE;
+
               let fill = 'url(#grad-hex-neutral)';
               let stroke = '#1e293b';
               let strokeWidth = 1.4;
+              let influenceFill: string | null = null;
+              let seamStroke = 'rgba(255, 255, 255, 0.04)';
 
-              if (tile.controlledBy === 'player') {
-                fill = 'url(#grad-hex-player)';
-                stroke = '#38bdf8';
-                strokeWidth = 1.8;
-              } else if (tile.controlledBy === 'ai') {
-                fill = 'url(#grad-hex-ai)';
-                stroke = '#f87171';
-                strokeWidth = 1.8;
+              if (influenceTeam) {
+                const rgb = TEAM_RGB[influenceTeam];
+                influenceFill = `rgba(${rgb}, ${(0.12 + 0.7 * strength).toFixed(3)})`;
+                stroke = `rgba(${rgb}, ${(0.3 + 0.6 * strength).toFixed(3)})`;
+                strokeWidth = 1.4 + 0.6 * strength;
+                seamStroke = `rgba(${rgb}, ${(0.1 + 0.25 * strength).toFixed(3)})`;
               }
 
               if (isSelectedTile) {
@@ -320,6 +328,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               }
 
               if (isTarget) {
+                influenceFill = null;
                 if (isAttack) {
                   fill = '#450a0a';
                   stroke = '#ef4444';
@@ -348,17 +357,20 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     className="transition-colors duration-150"
                   />
 
+                  {/* Influence shade overlay */}
+                  {influenceFill && (
+                    <path
+                      d={roundedHexPath(x, y, hexRadius - 1.5, 6)}
+                      fill={influenceFill}
+                      pointerEvents="none"
+                    />
+                  )}
+
                   {/* Inner beveled seam */}
                   <path
                     d={roundedHexPath(x, y, hexRadius - 5, 4)}
                     fill="none"
-                    stroke={
-                      tile.controlledBy === 'player'
-                        ? 'rgba(56, 189, 248, 0.25)'
-                        : tile.controlledBy === 'ai'
-                        ? 'rgba(248, 113, 113, 0.25)'
-                        : 'rgba(255, 255, 255, 0.04)'
-                    }
+                    stroke={seamStroke}
                     strokeWidth="1"
                     pointerEvents="none"
                   />
@@ -459,10 +471,9 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                 );
               })}
 
-              {/* Combat & Contested Territory Floating Capsule Badge */}
-              {hoveredMove.attackRank !== undefined &&
-                hoveredMove.defenseRank !== undefined &&
-                (hoveredMove.isAttack || (hoveredMove.flipsControl && hoveredMove.defenseRank > 0)) && (
+              {/* Combat Floating Capsule Badge */}
+              {hoveredMove.isAttack && (
+
                   <g
                     transform={`translate(${hexToPixel(hoveredMove.target, hexRadius).x}, ${hexToPixel(hoveredMove.target, hexRadius).y - 34})`}
                   >
@@ -473,7 +484,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                       height="22"
                       rx="11"
                       fill="#090d16"
-                      stroke={hoveredMove.isAttack ? '#ef4444' : '#38bdf8'}
+                      stroke="#ef4444"
                       strokeWidth="1.6"
                       filter="drop-shadow(0 4px 6px rgba(0,0,0,0.8))"
                     />
@@ -487,7 +498,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                       fontFamily="monospace"
                       letterSpacing="0.4"
                     >
-                      {hoveredMove.isAttack ? 'ATK' : 'CLAIM'} {hoveredMove.attackRank} vs DEF {hoveredMove.defenseRank}
+                      ATK {hoveredMove.attackRank} vs DEF {hoveredMove.defenseRank}
                     </text>
                   </g>
                 )}

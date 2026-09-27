@@ -1,4 +1,4 @@
-import { HexCoord, HexTile, Unit, UnitRank, Team } from '../types/game';
+import { HexCoord, HexTile, Unit, UnitRank } from '../types/game';
 import { coordKey, getHexNeighbors } from './hexMath';
 
 export interface GeneratedMap {
@@ -27,7 +27,6 @@ export function generateGameMap(): GeneratedMap {
       q: c.q,
       r: c.r,
       id: coordKey(c),
-      controlledBy: null,
     });
   }
 
@@ -83,31 +82,6 @@ export function generateGameMap(): GeneratedMap {
     // 3rd row (r = -2): Level 4 Sovereign at the front vanguard
     { rank: 4, coord: { q: 1, r: -2 }, id: 'ai-l4-sovereign' },
   ];
-
-  // Starting territory control
-  // Player base rows (all row 4, row 3, and the vanguard tile)
-  for (let q = -4; q <= 0; q++) {
-    const tile = tileMap.get(coordKey({ q, r: 4 }));
-    if (tile) tile.controlledBy = 'player';
-  }
-  for (let q = -4; q <= 1; q++) {
-    const tile = tileMap.get(coordKey({ q, r: 3 }));
-    if (tile) tile.controlledBy = 'player';
-  }
-  const playerVanguardTile = tileMap.get(coordKey({ q: -1, r: 2 }));
-  if (playerVanguardTile) playerVanguardTile.controlledBy = 'player';
-
-  // AI base rows (all row -4, row -3, and the vanguard tile)
-  for (let q = 0; q <= 4; q++) {
-    const tile = tileMap.get(coordKey({ q, r: -4 }));
-    if (tile) tile.controlledBy = 'ai';
-  }
-  for (let q = -1; q <= 4; q++) {
-    const tile = tileMap.get(coordKey({ q, r: -3 }));
-    if (tile) tile.controlledBy = 'ai';
-  }
-  const aiVanguardTile = tileMap.get(coordKey({ q: 1, r: -2 }));
-  if (aiVanguardTile) aiVanguardTile.controlledBy = 'ai';
 
   const units: Unit[] = [];
 
