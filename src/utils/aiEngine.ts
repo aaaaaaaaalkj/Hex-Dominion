@@ -198,7 +198,7 @@ function evaluateGrandmasterMove(
   if (unit.rank !== 4 && simAiSovereign) {
     const distToSovereign = hexDistance(move.target, simAiSovereign.coord);
     if (distToSovereign === 1) {
-      // Sentinel adds +2 to Sovereign defensive rank, Warden adds +1
+      // Each adjacent ally adds its rank to the Sovereign's defensive rank
       const defRankBoost = getUnitAuraRank(unit.rank);
       score += defRankBoost * 3000;
       explanation = `Bolster Sovereign defensive rank (+${defRankBoost} DEF)`;

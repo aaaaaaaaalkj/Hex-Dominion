@@ -7,7 +7,6 @@ interface SvgUnitPieceProps {
   cy: number;
   isSelected?: boolean;
   isAttackTarget?: boolean;
-  defensiveRank?: number;
 }
 
 export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
@@ -16,11 +15,9 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
   cy,
   isSelected = false,
   isAttackTarget = false,
-  defensiveRank,
 }) => {
   const isPlayer = unit.team === 'player';
   const isMoved = unit.hasMovedThisRound;
-  const hasDefensiveBackup = defensiveRank !== undefined && defensiveRank > unit.rank;
 
   // Base colors
   const primaryStroke = isMoved
@@ -300,24 +297,6 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
 
       {/* Main Unit Shape & Insignia */}
       {renderRankGraphics()}
-
-      {/* Defensive Support Shield Badge (when friendly neighbors boost defensive rank) */}
-      {hasDefensiveBackup && (
-        <g transform="translate(-13, -13)">
-          <circle cx="0" cy="0" r="6.5" fill="#090d16" stroke="#10b981" strokeWidth="1.2" />
-          <text
-            x="0"
-            y="2.5"
-            textAnchor="middle"
-            fill="#34d399"
-            fontSize="7.5"
-            fontWeight="900"
-            fontFamily="monospace"
-          >
-            {defensiveRank}
-          </text>
-        </g>
-      )}
 
       {/* Moved Checkmark Badge */}
       {isMoved && (

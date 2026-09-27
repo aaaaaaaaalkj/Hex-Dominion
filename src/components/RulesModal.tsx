@@ -59,10 +59,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white text-xs">Level 4: Sovereign</span>
-                    <span className="text-[10px] font-mono text-amber-400">1 Unit · Speed 1 · Aura 3</span>
+                    <span className="text-[10px] font-mono text-amber-400">1 Unit · Speed 1 · Aura 4</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Supreme Commander. Moves 1 tile. Projects a Level 3 aura (+3 combat support). Defeat brings instant victory.
+                    Supreme Commander. Moves 1 tile. Projects a Level 4 aura (+4 combat support). Defeat brings instant victory.
                   </p>
                 </div>
               </div>
@@ -75,10 +75,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white text-xs">Level 3: Sentinel</span>
-                    <span className="text-[10px] font-mono text-emerald-400">2 Units · Speed 2 · Aura 2</span>
+                    <span className="text-[10px] font-mono text-emerald-400">2 Units · Speed 2 · Aura 3</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Heavy bastion. Moves 2 tiles. Projects a Level 2 aura (+2 combat support).
+                    Heavy bastion. Moves 2 tiles. Projects a Level 3 aura (+3 combat support).
                   </p>
                 </div>
               </div>
@@ -91,10 +91,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white text-xs">Level 2: Warden</span>
-                    <span className="text-[10px] font-mono text-sky-400">3 Units · Speed 3 · Aura 1</span>
+                    <span className="text-[10px] font-mono text-sky-400">3 Units · Speed 3 · Aura 2</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Tactical skirmisher. Moves 3 tiles. Projects a Level 1 aura (+1 combat support).
+                    Tactical skirmisher. Moves 3 tiles. Projects a Level 2 aura (+2 combat support).
                   </p>
                 </div>
               </div>
@@ -107,10 +107,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white text-xs">Level 1: Scout</span>
-                    <span className="text-[10px] font-mono text-slate-300">4 Units · Speed 4 · Aura 0</span>
+                    <span className="text-[10px] font-mono text-slate-300">4 Units · Speed 4 · Aura 1</span>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                    Swift vanguard. Moves 4 tiles. Has no aura (aura = 0) and gives no combat support aura.
+                    Swift vanguard. Moves 4 tiles. Projects a Level 1 aura (+1 combat support).
                   </p>
                 </div>
               </div>
@@ -158,11 +158,11 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               <span>Combined Rank Combat & Aura Support</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Aura directly boosts combat power! Adjacent comrades project their aura rank (Rank - 1) as combat support:
+              Aura directly boosts combat power! Adjacent comrades project an aura equal to their rank as combat support, the same value they add to tile influence:
             </p>
             <div className="mt-2.5 p-2.5 rounded bg-slate-900 border border-slate-800 text-[11px] text-slate-400 leading-normal space-y-2">
               <div>
-                🛡️ <strong>Defensive Rank:</strong> A defender's defensive rank is its <strong>own rank plus the sum of aura ranks of all direct friendly neighbors</strong> (L4: +3, L3: +2, L2: +1, L1: +0).
+                🛡️ <strong>Defensive Rank:</strong> A defender's defensive rank is its <strong>own rank plus the sum of aura ranks of all direct friendly neighbors</strong> (L4: +4, L3: +3, L2: +2, L1: +1).
               </div>
               <div>
                 ⚔️ <strong>Attack Rank:</strong> An attacker's attack rank is its <strong>own rank plus the sum of aura ranks of friendly allies adjacent to the target</strong>. Flanking with high-rank auras allows you to defeat fortified enemies!

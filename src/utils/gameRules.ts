@@ -13,15 +13,12 @@ import {
 } from './hexMath';
 
 /**
- * Returns the aura rank of a unit:
- * Aura is reduced by 1 for all units:
- * - Level 4 Sovereign: Level 3 Aura
- * - Level 3 Sentinel: Level 2 Aura
- * - Level 2 Warden: Level 1 Aura
- * - Level 1 Scout: Level 0 Aura (no aura)
+ * Returns the aura rank of a unit: equal to its rank.
+ * The aura is the combat support a unit gives to adjacent allies and the
+ * influence it projects onto its own and adjacent tiles.
  */
 export function getUnitAuraRank(rank: UnitRank): number {
-  return Math.max(0, rank - 1);
+  return rank;
 }
 
 /**
@@ -83,7 +80,6 @@ export function countInfluencedTiles(influence: Map<string, number>): {
 /**
  * Calculates the total defensive rank of a defending unit:
  * Total defensive rank = defender's own rank + sum of aura ranks of direct friendly neighbors.
- * Note: Level 1 Scouts have aura 0, so they provide +0 combat support.
  */
 export function calculateDefensiveRank(
   defender: Unit,
@@ -102,7 +98,6 @@ export function calculateDefensiveRank(
 /**
  * Calculates the total attack rank of an attacking unit against a target coordinate:
  * Total attack rank = attacker's own rank + sum of aura ranks of direct friendly neighbors of the target.
- * Note: Level 1 Scouts have aura 0, so they provide +0 combat support.
  */
 export function calculateAttackRank(
   attacker: Unit,

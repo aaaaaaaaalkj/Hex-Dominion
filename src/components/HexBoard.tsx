@@ -16,14 +16,14 @@ import {
 import {
   getOpponentAurasAtCoord,
   getFriendlyAurasAtCoord,
-  calculateDefensiveRank,
   computeInfluenceMap,
+  applyMove,
 } from '../utils/gameRules';
 import { SvgUnitPiece } from './SvgUnitPiece';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 // Net influence at which a tile reaches its deepest shade
-const FULL_INFLUENCE = 12;
+const FULL_INFLUENCE = 16;
 
 const TEAM_RGB: Record<Team, string> = {
   player: '37, 99, 235',
@@ -127,19 +127,19 @@ export const HexBoard: React.FC<HexBoardProps> = ({
     return map;
   }, [units]);
 
-  // Defensive rank map based on friendly neighbors
-  const defensiveRankMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const u of units) {
-      if (!u.isDefeated) {
-        map.set(u.id, calculateDefensiveRank(u, units));
-      }
+  // Net influence per tile (positive = player/blue, negative = AI/red).
+  // While a unit is selected its influence is lifted off the board; hovering a
+  // target previews the board as if the move (including any capture) was made.
+  const influenceMap = useMemo(() => {
+    if (!selectedUnit) return computeInfluenceMap(tiles, units);
+    if (hoveredMove) {
+      return computeInfluenceMap(tiles, applyMove(selectedUnit.id, hoveredMove, units).newUnits);
     }
-    return map;
-  }, [units]);
-
-  // Net influence per tile (positive = player/blue, negative = AI/red)
-  const influenceMap = useMemo(() => computeInfluenceMap(tiles, units), [tiles, units]);
+    return computeInfluenceMap(
+      tiles,
+      units.filter((u) => u.id !== selectedUnit.id)
+    );
+  }, [tiles, units, selectedUnit, hoveredMove]);
 
   // Legal moves lookup map
   const moveByTarget = useMemo(() => {
@@ -328,16 +328,8 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               }
 
               if (isTarget) {
-                influenceFill = null;
-                if (isAttack) {
-                  fill = '#450a0a';
-                  stroke = '#ef4444';
-                  strokeWidth = 2.4;
-                } else {
-                  fill = '#064e3b';
-                  stroke = '#10b981';
-                  strokeWidth = 2.4;
-                }
+                stroke = isAttack ? '#ef4444' : '#10b981';
+                strokeWidth = 2.4;
               }
 
               return (
@@ -363,6 +355,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                       d={roundedHexPath(x, y, hexRadius - 1.5, 6)}
                       fill={influenceFill}
                       pointerEvents="none"
+                      style={{ transition: 'fill 120ms ease-out' }}
                     />
                   )}
 
@@ -406,7 +399,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     <g pointerEvents="none">
                       <path
                         d={roundedHexPath(x, y, hexRadius - 6, 4)}
-                        fill={isAttack ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.25)'}
+                        fill="none"
                         stroke={isAttack ? '#ef4444' : '#10b981'}
                         strokeWidth="1.8"
                         strokeDasharray="4 2"
@@ -646,6 +639,8 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                       const tile = tiles.get(coordKey(unit.coord));
                       if (tile) handleTileClick(tile);
                     }}
+                    onMouseEnter={() => moveInfo && setHoveredMove(moveInfo)}
+                    onMouseLeave={() => moveInfo && setHoveredMove(null)}
                   >
                     <SvgUnitPiece
                       unit={unit}
@@ -653,7 +648,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                       cy={y}
                       isSelected={isSelected}
                       isAttackTarget={isAttackTarget}
-                      defensiveRank={defensiveRankMap.get(unit.id)}
                     />
                   </g>
                 );
