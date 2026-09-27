@@ -1,0 +1,6 @@
+{
+  "name": "HexDominion: Tactical Hex Warfare",
+  "description": "Turn-based hex territory strategy game with rank-based aura defense, alternating movement initiative, and intelligent rule-based AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
