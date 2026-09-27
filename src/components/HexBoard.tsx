@@ -262,18 +262,20 @@ export const HexBoard: React.FC<HexBoardProps> = ({
             <stop offset="100%" stopColor="#0b0f19" stopOpacity="0.85" />
           </linearGradient>
 
-          {/* Unit Gradients */}
-          <radialGradient id="grad-unit-player" cx="40%" cy="35%" r="70%">
-            <stop offset="0%" stopColor="#2563eb" />
-            <stop offset="60%" stopColor="#1d4ed8" />
-            <stop offset="100%" stopColor="#0f172a" />
+          {/* Unit Gradients: dark team-tinted token bodies */}
+          <radialGradient id="grad-unit-player" cx="40%" cy="35%" r="75%">
+            <stop offset="0%" stopColor="#1e3a8a" />
+            <stop offset="100%" stopColor="#0a1230" />
           </radialGradient>
 
-          <radialGradient id="grad-unit-ai" cx="40%" cy="35%" r="70%">
-            <stop offset="0%" stopColor="#dc2626" />
-            <stop offset="60%" stopColor="#991b1b" />
-            <stop offset="100%" stopColor="#18040a" />
+          <radialGradient id="grad-unit-ai" cx="40%" cy="35%" r="75%">
+            <stop offset="0%" stopColor="#881337" />
+            <stop offset="100%" stopColor="#2a0612" />
           </radialGradient>
+
+          <filter id="unit-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000000" floodOpacity="0.7" />
+          </filter>
 
           {/* Moved filter */}
           <filter id="desaturate">
