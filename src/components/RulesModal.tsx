@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Crown, Star, Sword, Navigation, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { X, Crown, Star, Shield, Navigation, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { UNIT_DEFINITIONS } from '../types/game';
 
 interface RulesModalProps {
@@ -86,7 +86,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               {/* Level 2 */}
               <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex gap-3">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-b from-sky-600 to-sky-800 flex items-center justify-center shrink-0">
-                  <Sword className="w-5 h-5 text-white" />
+                  <Shield className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <div className="flex items-center justify-between">

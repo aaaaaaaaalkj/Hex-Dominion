@@ -42,8 +42,8 @@ const SYMBOL_PATH: Record<UnitRank, string> = {
   4: 'M -9,4.5 L -10,-6 L -4.5,-1.5 L 0,-9 L 4.5,-1.5 L 10,-6 L 9,4.5 Z M -9,6.5 L 9,6.5 L 9,10 L -9,10 Z',
   // General: star
   3: STAR_PATH,
-  // Captain: upright sword
-  2: 'M 0,-11 L 1.9,-8.3 L 1.9,3 L 6.5,3 L 6.5,5.4 L 1.3,5.4 L 1.3,8.4 L 2.4,9.6 L 0,11.2 L -2.4,9.6 L -1.3,8.4 L -1.3,5.4 L -6.5,5.4 L -6.5,3 L -1.9,3 L -1.9,-8.3 Z',
+  // Captain: heater shield
+  2: 'M 0,-10 L 8.5,-6.8 L 8.5,0 C 8.5,5.8 4.6,9 0,11 C -4.6,9 -8.5,5.8 -8.5,0 L -8.5,-6.8 Z',
   // Scout: arrowhead (points up; rotated to face the enemy)
   1: 'M 0,-9 L 8,7.5 L 0,3.5 L -8,7.5 Z',
 };
