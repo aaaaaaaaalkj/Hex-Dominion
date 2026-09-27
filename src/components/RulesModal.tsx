@@ -35,7 +35,7 @@ const GambitRules: React.FC = () => (
 
     <div>
       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-        The Pieces (no ranks, 11 per army: King, 2 Rooks, 2 Bishops, 6 Scouts)
+        The Pieces (no ranks, 10 per army: King, 2 Rooks, 2 Bishops, 5 Scouts)
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {([4, 3, 2, 1] as UnitRank[]).map((rank) => (

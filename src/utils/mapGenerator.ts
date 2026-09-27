@@ -114,29 +114,27 @@ export function generateGameMap(mode: GameMode = 'dominion'): GeneratedMap {
 }
 
 /**
- * Gambit setup, modeled on chess:
- * - back row: Rook, Bishop, King, Bishop, Rook
- * - second row: 6 Scouts, the left three facing NE and the right three NW
+ * Gambit setup: the King sits in the player's left corner of the board, flanked
+ * along both board edges by the Rooks (on different rows, so together they reach
+ * every row) and then by the Bishops. Five Scouts, facing NE toward the enemy
+ * corner, cover the formation.
  * The AI army is the point reflection of the player's (facing rotated by 180°).
  */
 function gambitSetup(): Unit[] {
-  const backRow: [number, UnitRank, string][] = [
-    [-4, 3, 'rook-left'],
-    [-3, 2, 'bishop-left'],
-    [-2, 4, 'king'],
-    [-1, 2, 'bishop-right'],
-    [0, 3, 'rook-right'],
-  ];
+  // Facing indices into HEX_DIRECTIONS: 1 = NE
   const pieces: { q: number; r: number; rank: UnitRank; name: string; facing?: number }[] = [
-    ...backRow.map(([q, rank, name]) => ({ q, r: 4, rank, name })),
-    // Scouts on row 3 (q = -4..1); facing indices into HEX_DIRECTIONS: 1 = NE, 2 = NW
-    ...[-4, -3, -2, -1, 0, 1].map((q, i) => ({
-      q,
-      r: 3,
-      rank: 1 as UnitRank,
-      name: `scout-${i + 1}`,
-      facing: i < 3 ? 1 : 2,
-    })),
+    { q: -4, r: 4, rank: 4, name: 'king' },
+    { q: -3, r: 4, rank: 3, name: 'rook-bottom' },
+    { q: -4, r: 3, rank: 3, name: 'rook-side' },
+    { q: -2, r: 4, rank: 2, name: 'bishop-bottom' },
+    { q: -4, r: 2, rank: 2, name: 'bishop-side' },
+    ...[
+      [-1, 3],
+      [-2, 3],
+      [-3, 3],
+      [-3, 2],
+      [-3, 1],
+    ].map(([q, r], i) => ({ q, r, rank: 1 as UnitRank, name: `scout-${i + 1}`, facing: 1 })),
   ];
 
   const units: Unit[] = [];
