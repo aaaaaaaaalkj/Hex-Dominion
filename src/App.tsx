@@ -36,6 +36,7 @@ import {
   Crown,
   Download,
   Trophy,
+  Route,
 } from 'lucide-react';
 
 export default function App() {
@@ -63,6 +64,7 @@ export default function App() {
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [showAuras, setShowAuras] = useState<boolean>(false);
+  const [showLastMove, setShowLastMove] = useState<boolean>(true);
 
   // Difficulty is permanently set to Grandmaster
   const difficulty = 'grandmaster';
@@ -559,6 +561,19 @@ export default function App() {
           {showAuras ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
         </button>
 
+        {/* Last Move Indicator Toggle */}
+        <button
+          onClick={() => setShowLastMove((v) => !v)}
+          title={showLastMove ? 'Hide Last Move' : 'Show Last Move'}
+          className={`p-2 rounded-xl border backdrop-blur-md shadow-xl transition-all ${
+            showLastMove
+              ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50 shadow-cyan-500/10'
+              : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800'
+          }`}
+        >
+          <Route className="w-3.5 h-3.5" />
+        </button>
+
         {/* Sound Toggle */}
         <button
           onClick={() => setSoundEnabled((s) => !s)}
@@ -629,6 +644,7 @@ export default function App() {
           isAiThinking={isAiThinking}
           showAuras={showAuras}
           lastMove={lastMove}
+          showLastMove={showLastMove}
           isGameOver={Boolean(winner)}
           onSelectUnit={handleSelectUnit}
           onExecuteMove={handlePlayerMove}

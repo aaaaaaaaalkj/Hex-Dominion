@@ -39,6 +39,7 @@ interface HexBoardProps {
   isAiThinking: boolean;
   showAuras: boolean;
   lastMove?: MoveRecord | null;
+  showLastMove?: boolean;
   isGameOver?: boolean;
   onSelectUnit: (unit: Unit) => void;
   onExecuteMove: (move: LegalMove) => void;
@@ -54,6 +55,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   isAiThinking,
   showAuras,
   lastMove,
+  showLastMove = true,
   isGameOver = false,
   onSelectUnit,
   onExecuteMove,
@@ -498,14 +500,17 @@ export const HexBoard: React.FC<HexBoardProps> = ({
             </g>
           )}
 
-          {/* 3. LAST MOVE HIGHLIGHT LAYER (Origin, Path, Destination) */}
-          {lastMove && !hoveredMove && (
+          {/* 3. LAST MOVE HIGHLIGHT LAYER (subtle path; badge only once the game is over) */}
+          {lastMove && showLastMove && !hoveredMove && (
             <g id="last-move-layer" pointerEvents="none">
               {(() => {
                 const fromPix = hexToPixel(lastMove.from, hexRadius);
                 const toPix = hexToPixel(lastMove.to, hexRadius);
-                const isPlayerMover = lastMove.team === 'player';
-                const moveColor = isPlayerMover ? '#38bdf8' : '#f43f5e';
+                const moveColor = lastMove.isAttack
+                  ? '#ef4444'
+                  : lastMove.team === 'player'
+                  ? '#38bdf8'
+                  : '#f43f5e';
 
                 const fullPath = [
                   lastMove.from,
@@ -523,29 +528,9 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                 }
 
                 return (
-                  <g>
+                  <g opacity={isGameOver ? 0.9 : 0.5}>
                     {/* Origin Marker */}
-                    <circle
-                      cx={fromPix.x}
-                      cy={fromPix.y}
-                      r={hexRadius - 12}
-                      fill="none"
-                      stroke={moveColor}
-                      strokeWidth="2.2"
-                      strokeDasharray="4 3"
-                      className="opacity-75"
-                    />
-                    <text
-                      x={fromPix.x}
-                      y={fromPix.y + 3}
-                      textAnchor="middle"
-                      fill={moveColor}
-                      fontSize="8.5"
-                      fontWeight="bold"
-                      fontFamily="monospace"
-                    >
-                      FROM
-                    </text>
+                    <circle cx={fromPix.x} cy={fromPix.y} r="4" fill={moveColor} />
 
                     {/* Path Polyline */}
                     {uniqueCoords.length > 1 && (
@@ -558,11 +543,10 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                           .join(' ')}
                         fill="none"
                         stroke={moveColor}
-                        strokeWidth="3.5"
-                        strokeDasharray="7 4"
+                        strokeWidth="1.5"
+                        strokeDasharray="4 4"
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        className="opacity-90"
                       />
                     )}
 
@@ -570,51 +554,40 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     <circle
                       cx={toPix.x}
                       cy={toPix.y}
-                      r={hexRadius - 8}
-                      fill={
-                        lastMove.isAttack
-                          ? 'rgba(239, 68, 68, 0.25)'
-                          : isPlayerMover
-                          ? 'rgba(56, 189, 248, 0.15)'
-                          : 'rgba(244, 63, 94, 0.15)'
-                      }
-                      stroke={lastMove.isAttack ? '#ef4444' : moveColor}
-                      strokeWidth="2.2"
-                      strokeDasharray="5 3"
+                      r={hexRadius - 10}
+                      fill="none"
+                      stroke={moveColor}
+                      strokeWidth="1.5"
                     />
 
-                    {/* Floating Decisive Badge (especially prominent after Game Over) */}
-                    <g transform={`translate(${toPix.x}, ${toPix.y - 36})`}>
-                      <rect
-                        x="-62"
-                        y="-12"
-                        width="124"
-                        height="24"
-                        rx="12"
-                        fill="#090d16"
-                        stroke={lastMove.isAttack ? '#ef4444' : moveColor}
-                        strokeWidth="1.8"
-                        filter="drop-shadow(0 6px 12px rgba(0,0,0,0.85))"
-                      />
-                      <text
-                        x="0"
-                        y="3.5"
-                        textAnchor="middle"
-                        fill="#ffffff"
-                        fontSize="9"
-                        fontWeight="900"
-                        fontFamily="monospace"
-                        letterSpacing="0.4"
-                      >
-                        {isGameOver
-                          ? lastMove.isAttack
-                            ? '⚔️ FINAL STRIKE'
-                            : '🏁 FINAL MOVE'
-                          : lastMove.isAttack
-                          ? '⚔️ LAST STRIKE'
-                          : 'LAST MOVE'}
-                      </text>
-                    </g>
+                    {/* Final move badge once the game is decided */}
+                    {isGameOver && (
+                      <g transform={`translate(${toPix.x}, ${toPix.y - 36})`}>
+                        <rect
+                          x="-62"
+                          y="-12"
+                          width="124"
+                          height="24"
+                          rx="12"
+                          fill="#090d16"
+                          stroke={moveColor}
+                          strokeWidth="1.8"
+                          filter="drop-shadow(0 6px 12px rgba(0,0,0,0.85))"
+                        />
+                        <text
+                          x="0"
+                          y="3.5"
+                          textAnchor="middle"
+                          fill="#ffffff"
+                          fontSize="9"
+                          fontWeight="900"
+                          fontFamily="monospace"
+                          letterSpacing="0.4"
+                        >
+                          {lastMove.isAttack ? '⚔️ FINAL STRIKE' : '🏁 FINAL MOVE'}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 );
               })()}
