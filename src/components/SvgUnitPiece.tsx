@@ -22,6 +22,7 @@ const TEAM_FILL = {
 };
 
 const OUTLINE = '#050914';
+const MOVED_FILL = '#0b1120';
 
 // Five-pointed star, outer radius 10.5
 const STAR_PATH = (() => {
@@ -58,28 +59,47 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
   const scale = SYMBOL_SCALE[unit.rank];
   const facingUp = unit.team === 'player';
 
+  const symbol = SYMBOL_PATH[unit.rank];
+  const transform = `scale(${scale})${unit.rank === 1 && !facingUp ? ' rotate(180)' : ''}`;
+  const teamColor = TEAM_FILL[unit.team];
+
   return (
-    <g
-      transform={`translate(${cx}, ${cy})`}
-      className="cursor-pointer"
-      style={{ opacity: isMoved ? 0.4 : 1 }}
-    >
+    <g transform={`translate(${cx}, ${cy})`} className="cursor-pointer">
       {/* Capture target: thin neutral ring */}
       {isAttackTarget && (
         <circle r={11 * scale + 7} fill="none" stroke="rgba(255, 255, 255, 0.45)" strokeWidth="1.5" />
       )}
 
-      {/* Rank symbol in team color with a dark outline */}
-      <g filter={isMoved ? 'url(#desaturate)' : 'url(#unit-shadow)'}>
-        <path
-          d={SYMBOL_PATH[unit.rank]}
-          transform={`scale(${scale})${unit.rank === 1 && !facingUp ? ' rotate(180)' : ''}`}
-          fill={TEAM_FILL[unit.team]}
-          stroke={OUTLINE}
-          strokeWidth={2.4 / scale}
-          strokeLinejoin="round"
-          paintOrder="stroke"
-        />
+      {/* Rank symbol: solid team color when ready, hollow team outline once moved.
+          Always fully opaque so the team color never mixes with the tile shade. */}
+      <g filter="url(#unit-shadow)" transform={transform}>
+        {isMoved ? (
+          <>
+            <path
+              d={symbol}
+              fill={MOVED_FILL}
+              stroke={OUTLINE}
+              strokeWidth={4.4 / scale}
+              strokeLinejoin="round"
+            />
+            <path
+              d={symbol}
+              fill="none"
+              stroke={teamColor}
+              strokeWidth={1.8 / scale}
+              strokeLinejoin="round"
+            />
+          </>
+        ) : (
+          <path
+            d={symbol}
+            fill={teamColor}
+            stroke={OUTLINE}
+            strokeWidth={2.4 / scale}
+            strokeLinejoin="round"
+            paintOrder="stroke"
+          />
+        )}
       </g>
     </g>
   );

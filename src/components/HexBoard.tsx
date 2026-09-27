@@ -267,11 +267,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
           <filter id="unit-shadow" x="-50%" y="-50%" width="200%" height="200%">
             <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000000" floodOpacity="0.7" />
           </filter>
-
-          {/* Moved filter */}
-          <filter id="desaturate">
-            <feColorMatrix type="saturate" values="0.15" />
-          </filter>
         </defs>
 
         {/* Pan and Zoom Layer: Scaled symmetrically around exact board center */}
