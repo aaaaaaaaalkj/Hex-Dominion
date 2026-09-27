@@ -74,11 +74,12 @@ export const GAMBIT_PIECES: Record<UnitRank, GambitPieceDefinition> = {
   4: { name: 'King', description: 'Moves 1 hex in any of the 6 directions. Checkmate it to win.' },
   3: {
     name: 'Rook',
-    description: 'Slides any distance across hex edges (6 directions), but captures only horizontally (E/W).',
+    description:
+      'Slides any distance horizontally through edges (E/W) and vertically through corners (N/S), like a chess rook. Cannot squeeze through a corner between two occupied hexes.',
   },
   2: {
     name: 'Bishop',
-    description: 'Slides and captures any distance through the upper and lower edges (NE, NW, SW, SE), never horizontally.',
+    description: 'Slides any distance through the upper and lower edges (NE, NW, SW, SE), never horizontally.',
   },
   1: {
     name: 'Scout',

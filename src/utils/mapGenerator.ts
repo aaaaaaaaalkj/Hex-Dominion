@@ -109,39 +109,56 @@ export function generateGameMap(mode: GameMode = 'dominion'): GeneratedMap {
 
   return {
     tiles: tileMap,
-    units: mode === 'gambit' ? toGambitSetup(units) : units,
+    units: mode === 'gambit' ? gambitSetup() : units,
   };
 }
 
 /**
- * Gambit setup: the King swaps places with the central back-row piece (a Bishop
- * in Gambit), moving the King behind its lines.
- * Scouts face the enemy through one of the two forward edges, outer pairs turned
- * toward the center.
+ * Gambit setup, modeled on chess:
+ * - back row: Rook, Bishop, King, Bishop, Rook
+ * - second row: 6 Scouts, the left three facing NE and the right three NW
+ * The AI army is the point reflection of the player's (facing rotated by 180°).
  */
-function toGambitSetup(units: Unit[]): Unit[] {
-  const swaps: Record<string, HexCoord> = {
-    'player-l4-king': { q: -2, r: 4 },
-    'player-l2-bastion-center': { q: -1, r: 2 },
-    'ai-l4-king': { q: 2, r: -4 },
-    'ai-l2-bastion-center': { q: 1, r: -2 },
-  };
-  // Facing indices into HEX_DIRECTIONS: 1 = NE, 2 = NW, 4 = SW, 5 = SE
-  const scoutFacing: Record<string, number> = {
-    'player-l1-scout-1': 1,
-    'player-l1-scout-2': 1,
-    'player-l1-scout-3': 2,
-    'player-l1-scout-4': 2,
-    'ai-l1-scout-1': 5,
-    'ai-l1-scout-2': 5,
-    'ai-l1-scout-3': 4,
-    'ai-l1-scout-4': 4,
-  };
-  return units.map((u) => ({
-    ...u,
-    coord: swaps[u.id] ? { ...swaps[u.id] } : u.coord,
-    facing: scoutFacing[u.id],
-  }));
+function gambitSetup(): Unit[] {
+  const backRow: [number, UnitRank, string][] = [
+    [-4, 3, 'rook-left'],
+    [-3, 2, 'bishop-left'],
+    [-2, 4, 'king'],
+    [-1, 2, 'bishop-right'],
+    [0, 3, 'rook-right'],
+  ];
+  const pieces: { q: number; r: number; rank: UnitRank; name: string; facing?: number }[] = [
+    ...backRow.map(([q, rank, name]) => ({ q, r: 4, rank, name })),
+    // Scouts on row 3 (q = -4..1); facing indices into HEX_DIRECTIONS: 1 = NE, 2 = NW
+    ...[-4, -3, -2, -1, 0, 1].map((q, i) => ({
+      q,
+      r: 3,
+      rank: 1 as UnitRank,
+      name: `scout-${i + 1}`,
+      facing: i < 3 ? 1 : 2,
+    })),
+  ];
+
+  const units: Unit[] = [];
+  for (const p of pieces) {
+    units.push({
+      id: `player-${p.name}`,
+      team: 'player',
+      rank: p.rank,
+      coord: { q: p.q, r: p.r },
+      hasMovedThisRound: false,
+      facing: p.facing,
+    });
+    units.push({
+      id: `ai-${p.name}`,
+      team: 'ai',
+      rank: p.rank,
+      coord: { q: -p.q, r: -p.r },
+      hasMovedThisRound: false,
+      facing: p.facing === undefined ? undefined : (p.facing + 3) % 6,
+    });
+  }
+  return units;
 }
 
 function ensureConnectivity(tileMap: Map<string, HexTile>) {

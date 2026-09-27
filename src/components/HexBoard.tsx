@@ -566,6 +566,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                 return (
                   <g
                     key={unit.id}
+                    data-unit={unit.id}
                     onClick={(e) => {
                       e.stopPropagation();
                       const tile = tiles.get(coordKey(unit.coord));

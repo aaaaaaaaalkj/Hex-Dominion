@@ -35,7 +35,7 @@ const GambitRules: React.FC = () => (
 
     <div>
       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-        The Pieces (no ranks, 10 per army)
+        The Pieces (no ranks, 11 per army: King, 2 Rooks, 2 Bishops, 6 Scouts)
       </h3>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {([4, 3, 2, 1] as UnitRank[]).map((rank) => (
@@ -65,10 +65,12 @@ const GambitRules: React.FC = () => (
         <li className="flex items-start gap-2">
           <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
           <span>
-            <strong>Rooks and Bishops:</strong> Rooks move along all 6 edge directions but capture only along
-            their horizontal line (E/W); in the other directions an enemy piece simply blocks them. Bishops move and
-            capture through the upper and lower edges (NE, NW, SW, SE) but never horizontally. The three tile
-            colors help to read the lines.
+            <strong>Rooks and Bishops:</strong> like in chess, Rooks move along a horizontal and a vertical axis:
+            horizontally through hex edges (E/W) and vertically straight up and down through hex corners (N/S).
+            Bishops move through the upper and lower edges (NE, NW, SW, SE) but never horizontally. Both slide any
+            distance and capture along every line they move on. <strong>No squeezing:</strong> a vertical Rook
+            step through a corner is blocked when both hexes beside that corner are occupied. The three tile colors
+            help to read the lines.
           </span>
         </li>
         <li className="flex items-start gap-2">

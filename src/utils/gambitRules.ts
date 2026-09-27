@@ -4,10 +4,11 @@ import { HEX_DIRECTIONS, coordKey, hexDistance } from './hexMath';
 /**
  * Gambit: chess-like rules on the hex board.
  * - King: 1 hex in any of the 6 edge directions
- * - Rook: slides any distance along the 6 edge directions, but captures only
- *   horizontally (E/W); in the other directions an enemy piece just blocks it
- * - Bishop: slides and captures any distance through the 4 non-horizontal edges
- *   (NE, NW, SW, SE)
+ * - Rook: slides any distance horizontally through edges (E/W) and vertically
+ *   through corners (N/S), like a chess rook. No squeezing: a corner step is
+ *   blocked when both hexes beside that corner are occupied
+ * - Bishop: slides any distance through the 4 non-horizontal edges (NE, NW, SW, SE)
+ * Pieces capture along every line they move on.
  * - Scout: faces an edge; 3 points per move, a step forward costs 1, a 60° turn costs 2;
  *   captures by stepping forward onto an enemy (ends the move)
  * Nothing jumps. A move may not leave the mover's own King in check.
@@ -19,15 +20,54 @@ export const SCOUT_TURN_COST = 2;
 
 type Occupancy = Map<string, Unit>;
 
-// Indices into HEX_DIRECTIONS (pointy-top hexes): 0 E, 1 NE, 2 NW, 3 W, 4 SW, 5 SE
-const ALL_DIRECTIONS = [0, 1, 2, 3, 4, 5];
-const HORIZONTAL_DIRECTIONS = [0, 3];
-const NON_HORIZONTAL_DIRECTIONS = [1, 2, 4, 5];
+// A line a sliding piece moves and captures along. Corner (vertical) steps pass
+// between two hexes (`between`, relative to the tile the step starts from).
+export interface Line {
+  step: HexCoord;
+  between?: readonly [HexCoord, HexCoord];
+}
 
-// Directions along which each sliding piece moves and captures
-const KING_LINES = { moves: ALL_DIRECTIONS, captures: ALL_DIRECTIONS };
-const ROOK_LINES = { moves: ALL_DIRECTIONS, captures: HORIZONTAL_DIRECTIONS };
-const BISHOP_LINES = { moves: NON_HORIZONTAL_DIRECTIONS, captures: NON_HORIZONTAL_DIRECTIONS };
+// Pointy-top hexes; HEX_DIRECTIONS: 0 E, 1 NE, 2 NW, 3 W, 4 SW, 5 SE. Each set is
+// closed under reversal, so the same sets also tell which pieces attack a tile.
+export const KING_LINES: readonly Line[] = HEX_DIRECTIONS.map((step) => ({ step }));
+export const ROOK_LINES: readonly Line[] = [
+  { step: HEX_DIRECTIONS[0] }, // E
+  { step: HEX_DIRECTIONS[3] }, // W
+  { step: { q: 1, r: -2 }, between: [HEX_DIRECTIONS[1], HEX_DIRECTIONS[2]] }, // N, top corner
+  { step: { q: -1, r: 2 }, between: [HEX_DIRECTIONS[4], HEX_DIRECTIONS[5]] }, // S, bottom corner
+];
+export const BISHOP_LINES: readonly Line[] = [1, 2, 4, 5].map((i) => ({ step: HEX_DIRECTIONS[i] }));
+
+/**
+ * Tiles along a line from `from` (exclusive): stops at the board edge, before a
+ * squeezed corner (both hexes beside it occupied) and at the first occupied tile
+ * (included, so the caller can decide about a capture).
+ */
+export function traceLine(
+  from: HexCoord,
+  line: Line,
+  maxSteps: number,
+  tiles: Map<string, HexTile>,
+  isOccupied: (key: string) => boolean
+): HexCoord[] {
+  const result: HexCoord[] = [];
+  let coord = from;
+  for (let step = 0; step < maxSteps; step++) {
+    if (
+      line.between &&
+      isOccupied(coordKey(add(coord, line.between[0]))) &&
+      isOccupied(coordKey(add(coord, line.between[1])))
+    ) {
+      break;
+    }
+    coord = add(coord, line.step);
+    const key = coordKey(coord);
+    if (!tiles.has(key)) break;
+    result.push(coord);
+    if (isOccupied(key)) break;
+  }
+  return result;
+}
 
 function buildOccupancy(units: Unit[]): Occupancy {
   const occupancy: Occupancy = new Map();
@@ -41,36 +81,30 @@ const add = (a: HexCoord, b: HexCoord): HexCoord => ({ q: a.q + b.q, r: a.r + b.
 
 function slidingMoves(
   unit: Unit,
-  lines: { moves: number[]; captures: number[] },
+  lines: readonly Line[],
   maxSteps: number,
   tiles: Map<string, HexTile>,
   occupancy: Occupancy
 ): LegalMove[] {
   const moves: LegalMove[] = [];
-  for (const i of lines.moves) {
-    const dir = HEX_DIRECTIONS[i];
-    const canCapture = lines.captures.includes(i);
-    let coord = unit.coord;
-    const path: HexCoord[] = [];
-    for (let step = 0; step < maxSteps; step++) {
-      coord = add(coord, dir);
-      if (!tiles.has(coordKey(coord))) break;
-      path.push(coord);
+  const isOccupied = (key: string) => occupancy.has(key);
+  for (const line of lines) {
+    const path = traceLine(unit.coord, line, maxSteps, tiles, isOccupied);
+    path.forEach((coord, i) => {
       const occupant = occupancy.get(coordKey(coord));
-      if (occupant) {
-        if (occupant.team !== unit.team && canCapture) {
-          moves.push({
-            target: coord,
-            path: [...path],
-            isAttack: true,
-            targetUnitId: occupant.id,
-            targetUnitRank: occupant.rank,
-          });
-        }
-        break;
+      const stepPath = path.slice(0, i + 1);
+      if (!occupant) {
+        moves.push({ target: coord, path: stepPath, isAttack: false });
+      } else if (occupant.team !== unit.team) {
+        moves.push({
+          target: coord,
+          path: stepPath,
+          isAttack: true,
+          targetUnitId: occupant.id,
+          targetUnitRank: occupant.rank,
+        });
       }
-      moves.push({ target: coord, path: [...path], isAttack: false });
-    }
+    });
   }
   return moves;
 }
@@ -164,22 +198,20 @@ export function isKingInCheck(team: Team, tiles: Map<string, HexTile>, units: Un
   if (!king) return false;
   const occupancy = buildOccupancy(units);
 
-  // Rays from the King along each edge direction: the first piece hit attacks the
-  // King if it can capture along that line (lines are symmetric: E/W stays E/W)
-  for (const i of ALL_DIRECTIONS) {
-    const dir = HEX_DIRECTIONS[i];
-    let coord = king.coord;
-    for (let step = 1; ; step++) {
-      coord = add(coord, dir);
-      if (!tiles.has(coordKey(coord))) break;
-      const occupant = occupancy.get(coordKey(coord));
-      if (!occupant) continue;
-      if (occupant.team !== team) {
-        if (occupant.rank === 3 && ROOK_LINES.captures.includes(i)) return true;
-        if (occupant.rank === 2 && BISHOP_LINES.captures.includes(i)) return true;
-        if (occupant.rank === 4 && step === 1) return true;
-      }
-      break;
+  // Rays from the King: the first piece hit along a line attacks the King if that
+  // piece moves along the line (King: adjacent only). Squeezed corners block both ways.
+  const rays: [readonly Line[], number, number][] = [
+    [ROOK_LINES, 3, Infinity],
+    [BISHOP_LINES, 2, Infinity],
+    [KING_LINES, 4, 1],
+  ];
+  const isOccupied = (key: string) => occupancy.has(key);
+  for (const [lines, attacker, maxSteps] of rays) {
+    for (const line of lines) {
+      const path = traceLine(king.coord, line, maxSteps, tiles, isOccupied);
+      const last = path[path.length - 1];
+      const occupant = last && occupancy.get(coordKey(last));
+      if (occupant && occupant.team !== team && occupant.rank === attacker) return true;
     }
   }
 

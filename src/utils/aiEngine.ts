@@ -5,9 +5,9 @@ import {
   calculateLegalMovesForUnit,
   getUnitSpeed,
 } from './gameRules';
-import { HEX_DIRECTIONS, coordKey, getHexNeighbors, hexDistance } from './hexMath';
+import { coordKey, getHexNeighbors, hexDistance } from './hexMath';
 import { GameAction, GameState, applyAction, getActions, isGameOver } from './gameState';
-import { calculateGambitMoves, isKingInCheck } from './gambitRules';
+import { BISHOP_LINES, ROOK_LINES, calculateGambitMoves, isKingInCheck, traceLine } from './gambitRules';
 
 /**
  * Search-based opponent.
@@ -48,8 +48,6 @@ const PIECE_VALUE: Record<UnitRank, number> = { 1: 100, 2: 180, 3: 260, 4: 0 }; 
 // Gambit: Scout, Bishop, Rook (the King is never captured: checkmate is terminal)
 const GAMBIT_PIECE_VALUE: Record<UnitRank, number> = { 1: 150, 2: 380, 3: 420, 4: 0 };
 const GAMBIT_MOBILITY_VALUE = 5; // per open tile on a Rook/Bishop line
-// Bishops slide only through the non-horizontal edges (NE, NW, SW, SE)
-const BISHOP_DIRECTIONS = [1, 2, 4, 5].map((i) => HEX_DIRECTIONS[i]);
 const GAMBIT_SCOUT_ADVANCE_VALUE = 6; // per row advanced toward the enemy
 const GAMBIT_KING_SHELTER_VALUE = 12; // per friendly piece next to the King
 const GAMBIT_CHECK_PENALTY = 40;
@@ -154,15 +152,8 @@ export function chooseAIAction(
 
       if (u.rank === 3 || u.rank === 2) {
         let open = 0;
-        for (const dir of u.rank === 3 ? HEX_DIRECTIONS : BISHOP_DIRECTIONS) {
-          let c = u.coord;
-          for (;;) {
-            c = { q: c.q + dir.q, r: c.r + dir.r };
-            const key = coordKey(c);
-            if (!board.index.has(key)) break;
-            open++;
-            if (occupied.has(key)) break;
-          }
+        for (const line of u.rank === 3 ? ROOK_LINES : BISHOP_LINES) {
+          open += traceLine(u.coord, line, Infinity, tiles, (key) => occupied.has(key)).length;
         }
         score += side * open * GAMBIT_MOBILITY_VALUE;
       } else if (u.rank === 1) {
