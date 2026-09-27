@@ -97,15 +97,9 @@ export const SvgUnitPiece: React.FC<SvgUnitPieceProps> = ({
         />
       )}
 
-      {/* Attack target: pulsing red ring with crosshair ticks */}
+      {/* Capture target: thin neutral ring around the token */}
       {isAttackTarget && (
-        <g className="animate-pulse" stroke="#ef4444" strokeWidth="2" strokeLinecap="round">
-          <circle r={r + 6} fill="rgba(239, 68, 68, 0.18)" />
-          <line x1={-(r + 11)} y1="0" x2={-(r + 3)} y2="0" />
-          <line x1={r + 3} y1="0" x2={r + 11} y2="0" />
-          <line x1="0" y1={-(r + 11)} x2="0" y2={-(r + 3)} />
-          <line x1="0" y1={r + 3} x2="0" y2={r + 11} />
-        </g>
+        <circle r={r + 5} fill="none" stroke="rgba(255, 255, 255, 0.45)" strokeWidth="1.5" />
       )}
 
       {/* Token body */}

@@ -301,6 +301,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               const moveInfo = moveByTarget.get(key);
               const isAttack = moveInfo?.isAttack;
               const isSelectedTile = selectedUnit && coordKey(selectedUnit.coord) === key;
+              const isHoveredTarget = hoveredMove !== null && coordKey(hoveredMove.target) === key;
 
               // Aura detection (active on controlled tiles)
               const enemyAuras = showAuras ? getOpponentAurasAtCoord('player', tile, units) : [];
@@ -333,9 +334,9 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                 strokeWidth = 2.8;
               }
 
-              if (isTarget) {
-                stroke = isAttack ? '#ef4444' : '#10b981';
-                strokeWidth = 2.4;
+              if (isHoveredTarget) {
+                stroke = 'rgba(255, 255, 255, 0.55)';
+                strokeWidth = 1.8;
               }
 
               return (
@@ -345,6 +346,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                   onMouseEnter={() => moveInfo && setHoveredMove(moveInfo)}
                   onMouseLeave={() => setHoveredMove(null)}
                   className="cursor-pointer"
+                  data-target={isTarget ? (isAttack ? 'attack' : 'move') : undefined}
                 >
                   {/* Outer rounded hex outline */}
                   <path
@@ -400,25 +402,15 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     </>
                   )}
 
-                  {/* Move Target Reticle */}
-                  {isTarget && (
-                    <g pointerEvents="none">
-                      <path
-                        d={roundedHexPath(x, y, hexRadius - 6, 4)}
-                        fill="none"
-                        stroke={isAttack ? '#ef4444' : '#10b981'}
-                        strokeWidth="1.8"
-                        strokeDasharray="4 2"
-                      />
-                      {!unitByCoord.has(key) && (
-                        <circle
-                          cx={x}
-                          cy={y}
-                          r="3.5"
-                          fill={isAttack ? '#ef4444' : '#10b981'}
-                        />
-                      )}
-                    </g>
+                  {/* Move target: small neutral dot (captures are marked by a ring on the unit) */}
+                  {isTarget && !isAttack && (
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={isHoveredTarget ? 5 : 4}
+                      fill={`rgba(255, 255, 255, ${isHoveredTarget ? 0.5 : 0.22})`}
+                      pointerEvents="none"
+                    />
                   )}
                 </g>
               );
@@ -436,39 +428,12 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                   .map((p) => `${p.x},${p.y}`)
                   .join(' ')}
                 fill="none"
-                stroke={hoveredMove.isAttack ? '#ef4444' : '#10b981'}
-                strokeWidth="3.5"
-                strokeDasharray="6 4"
+                stroke="rgba(255, 255, 255, 0.45)"
+                strokeWidth="1.5"
+                strokeDasharray="3 4"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              {/* Step indicator bubbles */}
-              {hoveredMove.path.map((stepCoord, idx) => {
-                const { x, y } = hexToPixel(stepCoord, hexRadius);
-                return (
-                  <g key={`step-${idx}`} transform={`translate(${x}, ${y})`}>
-                    <circle
-                      cx="0"
-                      cy="0"
-                      r="8"
-                      fill="#090d16"
-                      stroke={hoveredMove.isAttack ? '#ef4444' : '#10b981'}
-                      strokeWidth="1.5"
-                    />
-                    <text
-                      x="0"
-                      y="3"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="9"
-                      fontWeight="bold"
-                      fontFamily="monospace"
-                    >
-                      {idx + 1}
-                    </text>
-                  </g>
-                );
-              })}
 
               {/* Combat Floating Capsule Badge */}
               {hoveredMove.isAttack && (
