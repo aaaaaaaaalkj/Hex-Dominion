@@ -41,6 +41,7 @@ interface HexBoardProps {
   lastMove?: MoveRecord | null;
   showLastMove?: boolean;
   isGameOver?: boolean;
+  isFinalMove?: boolean; // whether lastMove is the game's final move
   onSelectUnit: (unit: Unit) => void;
   onExecuteMove: (move: LegalMove) => void;
   onSkipUnit?: (unit: Unit) => void;
@@ -57,6 +58,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   lastMove,
   showLastMove = true,
   isGameOver = false,
+  isFinalMove = true,
   onSelectUnit,
   onExecuteMove,
   onSkipUnit,
@@ -563,7 +565,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     />
 
                     {/* Final move badge once the game is decided */}
-                    {isGameOver && (
+                    {isGameOver && isFinalMove && (
                       <g transform={`translate(${toPix.x}, ${toPix.y - 36})`}>
                         <rect
                           x="-62"

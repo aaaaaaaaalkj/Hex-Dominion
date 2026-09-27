@@ -26,6 +26,7 @@ import { generateGameLogText, downloadGameLog } from './utils/gameExporter';
 import { HexBoard } from './components/HexBoard';
 import { RulesModal } from './components/RulesModal';
 import { GameOverModal } from './components/GameOverModal';
+import { ReplayControls } from './components/ReplayControls';
 import {
   RotateCcw,
   BookOpen,
@@ -35,7 +36,6 @@ import {
   EyeOff,
   Crown,
   Download,
-  Trophy,
   Route,
 } from 'lucide-react';
 
@@ -56,6 +56,9 @@ export default function App() {
 
   // Move History & Decisive Move tracking
   const [moveHistory, setMoveHistory] = useState<MoveRecord[]>([]);
+  // Board snapshots for post-game replay: unitHistory[i] = units after move i (0 = start)
+  const [unitHistory, setUnitHistory] = useState<Unit[][]>([]);
+  const [replayIndex, setReplayIndex] = useState<number>(0);
   const [lastMove, setLastMove] = useState<MoveRecord | null>(null);
   const [showGameOverModal, setShowGameOverModal] = useState<boolean>(true);
 
@@ -90,6 +93,8 @@ export default function App() {
     setWinner(null);
     setMoveCount(0);
     setMoveHistory([]);
+    setUnitHistory([newUnits]);
+    setReplayIndex(0);
     setLastMove(null);
     setShowGameOverModal(true);
     soundEffects.playRoundChange();
@@ -232,6 +237,7 @@ export default function App() {
       };
 
       setMoveHistory((prev) => [...prev, record]);
+      setUnitHistory((prev) => [...prev, newUnits]);
       setLastMove(record);
 
       if (isGameOver && gameWinner) {
@@ -281,6 +287,7 @@ export default function App() {
       };
 
       setMoveHistory((prev) => [...prev, record]);
+      setUnitHistory((prev) => [...prev, newUnits]);
       setLastMove(record);
 
       evaluateNextTurn(unit.team, tiles, newUnits);
@@ -365,6 +372,7 @@ export default function App() {
       };
 
       setMoveHistory((prev) => [...prev, record]);
+      setUnitHistory((prev) => [...prev, newUnits]);
       setLastMove(record);
 
       evaluateNextTurn('player', tiles, newUnits);
@@ -435,6 +443,24 @@ export default function App() {
       aiSovereignAlive,
     };
   }, [tiles, units]);
+
+  // Post-game replay: show the board as it was after the selected move
+  const isReviewing = Boolean(winner) && !showGameOverModal;
+  const displayUnits = isReviewing ? unitHistory[replayIndex] ?? units : units;
+  const displayLastMove = isReviewing
+    ? replayIndex > 0
+      ? moveHistory[replayIndex - 1]
+      : null
+    : lastMove;
+
+  const barStats = useMemo(() => {
+    const totalTiles = tiles.size || 1;
+    const { player, ai } = countInfluencedTiles(computeInfluenceMap(tiles, displayUnits));
+    return {
+      playerInfluencePct: Math.round((player / totalTiles) * 100),
+      aiInfluencePct: Math.round((ai / totalTiles) * 100),
+    };
+  }, [tiles, displayUnits]);
 
   // Text Export Handlers
   const handleExportText = useCallback(() => {
@@ -597,22 +623,22 @@ export default function App() {
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-md text-[11px] font-mono tabular-nums shadow-lg pointer-events-none">
         <div className="flex items-center gap-1.5 text-cyan-400">
           <Crown className="w-3.5 h-3.5" />
-          <span>{stats.playerInfluencePct}%</span>
+          <span>{barStats.playerInfluencePct}%</span>
         </div>
 
         <div className="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
           <div
-            style={{ width: `${stats.playerInfluencePct}%` }}
+            style={{ width: `${barStats.playerInfluencePct}%` }}
             className="bg-cyan-500 transition-all duration-300"
           />
           <div
-            style={{ width: `${stats.aiInfluencePct}%` }}
+            style={{ width: `${barStats.aiInfluencePct}%` }}
             className="bg-rose-500 transition-all duration-300 ml-auto"
           />
         </div>
 
         <div className="flex items-center gap-1.5 text-rose-400">
-          <span>{stats.aiInfluencePct}%</span>
+          <span>{barStats.aiInfluencePct}%</span>
           <Crown className="w-3.5 h-3.5" />
         </div>
       </div>
@@ -634,70 +660,36 @@ export default function App() {
       )}
 
       {/* 4. MAIN FULLSCREEN HEX BOARD (Pure GPU-accelerated SVG) */}
-      <div className="w-full h-full">
+      {/* While reviewing, leave room at the bottom for the replay controller */}
+      <div className={`w-full h-full ${isReviewing ? 'pb-28' : ''}`}>
         <HexBoard
           tiles={tiles}
-          units={units}
+          units={displayUnits}
           selectedUnit={selectedUnit}
           legalMoves={legalMoves}
           currentTurn={currentTurn}
           isAiThinking={isAiThinking}
           showAuras={showAuras}
-          lastMove={lastMove}
-          showLastMove={showLastMove}
+          lastMove={displayLastMove}
+          showLastMove={isReviewing || showLastMove}
           isGameOver={Boolean(winner)}
+          isFinalMove={!isReviewing || replayIndex === moveHistory.length}
           onSelectUnit={handleSelectUnit}
           onExecuteMove={handlePlayerMove}
           onSkipUnit={skipUnitTurn}
         />
       </div>
 
-      {/* 5. POST-GAME BOARD REVIEW FLOATING CONTROLLER */}
-      {winner && !showGameOverModal && (
-        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 p-2 px-3 rounded-2xl bg-slate-900/90 border border-slate-700 backdrop-blur-md shadow-2xl animate-in fade-in slide-in-from-bottom-3 duration-200">
-          <div className="flex items-center gap-2 text-xs mr-2">
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                winner === 'player'
-                  ? 'bg-cyan-400 shadow-[0_0_8px_#38bdf8]'
-                  : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'
-              }`}
-            />
-            <span className="font-bold text-white">
-              {winner === 'player' ? 'Player Victory' : 'AI Victory'}
-            </span>
-            {lastMove && (
-              <span className="text-[11px] text-slate-400 hidden sm:inline">
-                · Final: {lastMove.unitName}{' '}
-                {lastMove.isAttack ? `struck ${lastMove.capturedName}` : 'moved'} to ({lastMove.to.q},{lastMove.to.r})
-              </span>
-            )}
-          </div>
-
-          <button
-            onClick={() => setShowGameOverModal(true)}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-          >
-            <Trophy className="w-3.5 h-3.5 text-amber-400" />
-            <span>Summary</span>
-          </button>
-
-          <button
-            onClick={handleExportText}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-          >
-            <Download className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Export Text</span>
-          </button>
-
-          <button
-            onClick={initGame}
-            className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>New Match</span>
-          </button>
-        </div>
+      {/* 5. POST-GAME MOVE-BY-MOVE REPLAY CONTROLLER */}
+      {winner && isReviewing && (
+        <ReplayControls
+          moveHistory={moveHistory}
+          index={replayIndex}
+          onIndexChange={setReplayIndex}
+          onShowSummary={() => setShowGameOverModal(true)}
+          onExportText={handleExportText}
+          onNewMatch={initGame}
+        />
       )}
 
       {/* 6. MODALS */}
@@ -714,7 +706,10 @@ export default function App() {
           aiDefeats={stats.aiDefeats}
           lastMove={lastMove}
           onRestart={initGame}
-          onInspectBoard={() => setShowGameOverModal(false)}
+          onInspectBoard={() => {
+            setReplayIndex(moveHistory.length);
+            setShowGameOverModal(false);
+          }}
           onExportText={handleExportText}
           onCopyText={handleCopyText}
         />
