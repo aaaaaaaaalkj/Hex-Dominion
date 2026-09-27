@@ -1,16 +1,21 @@
 {
-  "name": "react-example",
+  "name": "hex-dominion",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Turn-based hex strategy game with two rulesets (Dominion and Gambit) and a search-based AI opponent.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource-variable/cinzel": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "lucide-react": "^1.48.0",
@@ -19,7 +24,6 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
