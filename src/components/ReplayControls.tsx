@@ -29,8 +29,6 @@ function describeMove(move: MoveRecord): string {
   let action: string;
   if (move.isAttack) {
     action = `struck ${move.capturedName} at ${to} · ATK ${move.attackRank} vs DEF ${move.defenseRank}`;
-  } else if (move.from.q === move.to.q && move.from.r === move.to.r) {
-    action = 'held position (no legal moves)';
   } else {
     action = `moved (${move.from.q},${move.from.r}) → ${to}`;
   }

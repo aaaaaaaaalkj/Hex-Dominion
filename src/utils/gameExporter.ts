@@ -117,8 +117,6 @@ export function generateGameLogText(data: GameExportData): string {
         if (m.isWinningMove) {
           detail += ' *** DECISIVE BLOW ***';
         }
-      } else if (m.from.q === m.to.q && m.from.r === m.to.r) {
-        detail = 'Skipped turn (held position - no legal moves)';
       } else {
         detail = 'Moved';
       }

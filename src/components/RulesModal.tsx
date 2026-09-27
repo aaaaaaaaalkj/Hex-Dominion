@@ -194,7 +194,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong>Zugzwang & Turn Skip:</strong> You must move a unit during your turn if legal moves exist. <strong>If a unit has no legal moves, it skips its turn (stays where it is)</strong>, passing initiative to the opponent.
+                  <strong>Zugzwang & Waiting:</strong> You must move a unit during your turn if any of your units can move. Units without a legal move cannot act; if none of your remaining units can move, you wait and the opponent continues. Waiting units may still move later in the round if they get freed. The round ends when neither side can move.
                 </span>
               </li>
               <li className="flex items-start gap-2">

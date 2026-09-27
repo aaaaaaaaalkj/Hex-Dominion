@@ -44,7 +44,6 @@ interface HexBoardProps {
   isFinalMove?: boolean; // whether lastMove is the game's final move
   onSelectUnit: (unit: Unit) => void;
   onExecuteMove: (move: LegalMove) => void;
-  onSkipUnit?: (unit: Unit) => void;
 }
 
 export const HexBoard: React.FC<HexBoardProps> = ({
@@ -61,7 +60,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   isFinalMove = true,
   onSelectUnit,
   onExecuteMove,
-  onSkipUnit,
 }) => {
   const hexRadius = 45; // Hex radius in pixels
   const [hoveredMove, setHoveredMove] = useState<LegalMove | null>(null);
@@ -578,44 +576,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               })}
           </g>
 
-          {/* 5. NO LEGAL MOVES / SKIP TURN BADGE OVER SELECTED UNIT */}
-          {selectedUnit && legalMoves.length === 0 && !isGameOver && (
-            <g
-              id="skip-turn-badge"
-              transform={`translate(${hexToPixel(selectedUnit.coord, hexRadius).x}, ${
-                hexToPixel(selectedUnit.coord, hexRadius).y - 36
-              })`}
-              className="cursor-pointer"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSkipUnit?.(selectedUnit);
-              }}
-            >
-              <rect
-                x="-70"
-                y="-13"
-                width="140"
-                height="26"
-                rx="13"
-                fill="#0f172a"
-                stroke="#f59e0b"
-                strokeWidth="1.8"
-                filter="drop-shadow(0 4px 8px rgba(0,0,0,0.85))"
-              />
-              <text
-                x="0"
-                y="3.5"
-                textAnchor="middle"
-                fill="#fbbf24"
-                fontSize="9"
-                fontWeight="900"
-                fontFamily="monospace"
-                letterSpacing="0.4"
-              >
-                NO MOVES · SKIP TURN
-              </text>
-            </g>
-          )}
         </g>
       </svg>
     </div>

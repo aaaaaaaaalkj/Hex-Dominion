@@ -16,7 +16,6 @@ import { generateGameMap } from './utils/mapGenerator';
 import {
   calculateLegalMovesForUnit,
   applyMove,
-  hasAnyLegalMoves,
   computeInfluenceMap,
   countInfluencedTiles,
 } from './utils/gameRules';
@@ -53,6 +52,8 @@ export default function App() {
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
   const [legalMoves, setLegalMoves] = useState<LegalMove[]>([]);
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
+  // Short-lived notice, e.g. when one side has no legal move and the other continues
+  const [turnNotice, setTurnNotice] = useState<string | null>(null);
   const [moveCount, setMoveCount] = useState<number>(0);
 
   // Move History & Decisive Move tracking
@@ -104,6 +105,7 @@ export default function App() {
     setReplayIndex(0);
     setLastMove(null);
     setShowGameOverModal(true);
+    setTurnNotice(null);
     soundEffects.playRoundChange();
   }, []);
 
@@ -140,6 +142,13 @@ export default function App() {
       if (next.newRound) {
         setRoundNumber((r) => r + 1);
         soundEffects.playRoundChange();
+      }
+      if (next.waiting) {
+        setTurnNotice(
+          next.waiting === 'player'
+            ? 'None of your remaining units can move · the AI continues'
+            : 'The AI has no legal moves · you continue'
+        );
       }
 
       // Increment turnTrigger to ensure any effect watching turns (like AI) always fires
@@ -211,46 +220,6 @@ export default function App() {
     [tiles, units, roundNumber, moveCount, evaluateNextTurn]
   );
 
-  // Skip turn for a unit that has no legal moves (stays where it is)
-  const skipUnitTurn = useCallback(
-    (unit: Unit) => {
-      const newUnits = units.map((u) =>
-        u.id === unit.id ? { ...u, hasMovedThisRound: true } : u
-      );
-
-      soundEffects.playMove();
-
-      const nextMoveCount = moveCount + 1;
-      setMoveCount(nextMoveCount);
-      setUnits(newUnits);
-      setSelectedUnit(null);
-      setLegalMoves([]);
-      setLastMover(unit.team);
-
-      const record: MoveRecord = {
-        id: `move-${nextMoveCount}`,
-        turnNumber: nextMoveCount,
-        roundNumber,
-        team: unit.team,
-        unitRank: unit.rank,
-        unitName: UNIT_DEFINITIONS[unit.rank].name,
-        from: { ...unit.coord },
-        to: { ...unit.coord },
-        path: [unit.coord],
-        isAttack: false,
-        isWinningMove: false,
-        timestamp: Date.now(),
-      };
-
-      setMoveHistory((prev) => [...prev, record]);
-      setUnitHistory((prev) => [...prev, newUnits]);
-      setLastMove(record);
-
-      evaluateNextTurn(unit.team, tiles, newUnits);
-    },
-    [units, tiles, roundNumber, moveCount, evaluateNextTurn]
-  );
-
   // Player selects an active unit
   const handleSelectUnit = useCallback(
     (unit: Unit) => {
@@ -262,12 +231,8 @@ export default function App() {
 
       const moves = calculateLegalMovesForUnit(unit, tiles, units);
 
+      // Units without legal moves can still be selected to preview lifting their influence
       if (selectedUnit?.id === unit.id) {
-        if (moves.length === 0) {
-          // Clicking a trapped unit again skips its turn (stays where it is)
-          skipUnitTurn(unit);
-          return;
-        }
         setSelectedUnit(null);
         setLegalMoves([]);
         return;
@@ -277,7 +242,7 @@ export default function App() {
       setLegalMoves(moves);
       soundEffects.playSelect();
     },
-    [currentTurn, isAiThinking, winner, selectedUnit, tiles, units, skipUnitTurn]
+    [currentTurn, isAiThinking, winner, selectedUnit, tiles, units]
   );
 
   // Player executes move on target hex
@@ -289,60 +254,18 @@ export default function App() {
     [selectedUnit, currentTurn, isAiThinking, winner, executeMove]
   );
 
-  // Auto-skip remaining player units if none have any legal moves
-  useEffect(() => {
-    if (currentTurn !== 'player' || winner) return;
-
-    const unmovedPlayerUnits = units.filter(
-      (u) => u.team === 'player' && !u.isDefeated && !u.hasMovedThisRound
-    );
-
-    if (unmovedPlayerUnits.length > 0 && !hasAnyLegalMoves('player', tiles, units)) {
-      const newUnits = units.map((u) =>
-        u.team === 'player' && !u.isDefeated && !u.hasMovedThisRound
-          ? { ...u, hasMovedThisRound: true }
-          : u
-      );
-
-      setUnits(newUnits);
-      setSelectedUnit(null);
-      setLegalMoves([]);
-
-      const firstUnit = unmovedPlayerUnits[0];
-      const nextMoveCount = moveCount + 1;
-      setMoveCount(nextMoveCount);
-
-      const record: MoveRecord = {
-        id: `move-${nextMoveCount}`,
-        turnNumber: nextMoveCount,
-        roundNumber,
-        team: 'player',
-        unitRank: firstUnit.rank,
-        unitName: UNIT_DEFINITIONS[firstUnit.rank].name,
-        from: { ...firstUnit.coord },
-        to: { ...firstUnit.coord },
-        path: [firstUnit.coord],
-        isAttack: false,
-        isWinningMove: false,
-        timestamp: Date.now(),
-      };
-
-      setMoveHistory((prev) => [...prev, record]);
-      setUnitHistory((prev) => [...prev, newUnits]);
-      setLastMove(record);
-
-      evaluateNextTurn('player', tiles, newUnits);
-    }
-  }, [currentTurn, winner, units, tiles, moveCount, roundNumber, evaluateNextTurn]);
-
   // Execute move and evaluate turn refs to avoid stale closures
   const executeMoveRef = React.useRef(executeMove);
   executeMoveRef.current = executeMove;
   const evaluateNextTurnRef = React.useRef(evaluateNextTurn);
   evaluateNextTurnRef.current = evaluateNextTurn;
 
-  const skipUnitTurnRef = React.useRef(skipUnitTurn);
-  skipUnitTurnRef.current = skipUnitTurn;
+  // Hide the turn notice after a moment
+  useEffect(() => {
+    if (!turnNotice) return;
+    const timer = setTimeout(() => setTurnNotice(null), 3000);
+    return () => clearTimeout(timer);
+  }, [turnNotice]);
 
   // Search-based AI runs in a Web Worker so the UI stays responsive while it thinks
   const aiWorkerRef = React.useRef<Worker | null>(null);
@@ -375,23 +298,13 @@ export default function App() {
         const currentUnits = unitsRef.current;
         const action = result?.action;
         const actingUnit =
-          action && action.kind !== 'pass'
-            ? currentUnits.find((u) => u.id === action.unitId)
-            : undefined;
+          action?.kind === 'move' ? currentUnits.find((u) => u.id === action.unitId) : undefined;
 
         if (action?.kind === 'move' && actingUnit) {
           executeMoveRef.current(actingUnit, action.move);
-        } else if (action?.kind === 'skip' && actingUnit) {
-          skipUnitTurnRef.current(actingUnit);
         } else {
-          // No AI unit can move: all remaining AI units hold position
-          const updatedAiUnits = currentUnits.map((u) =>
-            u.team === 'ai' && !u.isDefeated && !u.hasMovedThisRound
-              ? { ...u, hasMovedThisRound: true }
-              : u
-          );
-          setUnits(updatedAiUnits);
-          evaluateNextTurnRef.current('ai', tilesRef.current, updatedAiUnits);
+          // Fallback: no AI unit can move, hand the turn on
+          evaluateNextTurnRef.current('ai', tilesRef.current, currentUnits);
         }
         setIsAiThinking(false);
       }, delay);
@@ -534,16 +447,8 @@ export default function App() {
                   ? selectedUnit
                     ? legalMoves.length === 0
                       ? (
-                        <span className="inline-flex items-center gap-2">
-                          <span className="text-amber-300 font-semibold">
-                            {UNIT_DEFINITIONS[selectedUnit.rank].name} (No Moves)
-                          </span>
-                          <button
-                            onClick={() => skipUnitTurn(selectedUnit)}
-                            className="px-2 py-0.5 rounded-lg bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-500/50 text-[11px] font-bold transition-all shadow-sm cursor-pointer"
-                          >
-                            Skip Turn (Stay)
-                          </button>
+                        <span className="text-slate-400">
+                          {UNIT_DEFINITIONS[selectedUnit.rank].name} · no legal moves
                         </span>
                       )
                       : `${UNIT_DEFINITIONS[selectedUnit.rank].name} (Moves ${UNIT_DEFINITIONS[selectedUnit.rank].speed} · Aura ${UNIT_DEFINITIONS[selectedUnit.rank].auraRank})`
@@ -645,19 +550,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* 3.5 FLOATING PROMPT WHEN A TRAPPED UNIT WITH NO MOVES IS SELECTED */}
-      {selectedUnit && legalMoves.length === 0 && !winner && currentTurn === 'player' && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-950/95 border-2 border-amber-500 backdrop-blur-md shadow-[0_0_25px_rgba(245,158,11,0.35)] animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto">
-          <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-          <span className="text-xs font-bold text-amber-200">
-            {UNIT_DEFINITIONS[selectedUnit.rank].name} is blocked and has no legal moves.
-          </span>
-          <button
-            onClick={() => skipUnitTurn(selectedUnit)}
-            className="px-3.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all shadow-md cursor-pointer flex items-center gap-1 active:scale-95"
-          >
-            <span>Skip Turn (Stay)</span>
-          </button>
+      {/* 3.5 TURN NOTICE (e.g. one side has no legal move and the other continues) */}
+      {turnNotice && !winner && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 backdrop-blur-md shadow-lg text-xs text-slate-300 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-none">
+          {turnNotice}
         </div>
       )}
 
@@ -678,7 +574,6 @@ export default function App() {
           isFinalMove={!isReviewing || replayIndex === moveHistory.length}
           onSelectUnit={handleSelectUnit}
           onExecuteMove={handlePlayerMove}
-          onSkipUnit={skipUnitTurn}
         />
       </div>
 
