@@ -14,8 +14,6 @@ import {
   areCoordsEqual,
 } from '../utils/hexMath';
 import {
-  getOpponentAurasAtCoord,
-  getFriendlyAurasAtCoord,
   computeInfluenceMap,
   applyMove,
 } from '../utils/gameRules';
@@ -37,7 +35,6 @@ interface HexBoardProps {
   legalMoves: LegalMove[];
   currentTurn: Team;
   isAiThinking: boolean;
-  showAuras: boolean;
   lastMove?: MoveRecord | null;
   showLastMove?: boolean;
   isGameOver?: boolean;
@@ -53,7 +50,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   legalMoves,
   currentTurn,
   isAiThinking,
-  showAuras,
   lastMove,
   showLastMove = true,
   isGameOver = false,
@@ -285,12 +281,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               const isSelectedTile = selectedUnit && coordKey(selectedUnit.coord) === key;
               const isHoveredTarget = hoveredMove !== null && coordKey(hoveredMove.target) === key;
 
-              // Aura detection (active on controlled tiles)
-              const enemyAuras = showAuras ? getOpponentAurasAtCoord('player', tile, units) : [];
-              const hasEnemyAura = enemyAuras.length > 0;
-              const friendlyAuras = showAuras ? getFriendlyAurasAtCoord('player', tile, units) : [];
-              const hasFriendlyAura = friendlyAuras.length > 0;
-
               // Influence shading: deeper shade = stronger net influence
               const influence = influenceMap.get(key) ?? 0;
               const influenceTeam: Team | null =
@@ -357,32 +347,6 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     strokeWidth="1"
                     pointerEvents="none"
                   />
-
-                  {/* Aura defense zone outline */}
-                  {showAuras && !isTarget && (
-                    <>
-                      {hasEnemyAura && (
-                        <path
-                          d={roundedHexPath(x, y, hexRadius - 8, 4)}
-                          fill="rgba(239, 68, 68, 0.14)"
-                          stroke="#ef4444"
-                          strokeWidth="1.2"
-                          strokeDasharray="3 3"
-                          pointerEvents="none"
-                        />
-                      )}
-                      {hasFriendlyAura && (
-                        <path
-                          d={roundedHexPath(x, y, hexRadius - 9, 4)}
-                          fill="rgba(56, 189, 248, 0.1)"
-                          stroke="#38bdf8"
-                          strokeWidth="1.2"
-                          strokeDasharray="2 2"
-                          pointerEvents="none"
-                        />
-                      )}
-                    </>
-                  )}
 
                   {/* Move target: small neutral dot (captures are marked by a ring on the unit) */}
                   {isTarget && !isAttack && (

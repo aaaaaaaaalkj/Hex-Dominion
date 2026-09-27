@@ -115,60 +115,6 @@ export function calculateAttackRank(
 }
 
 /**
- * Returns all active friendly units with aura > 0 projecting support onto a unit.
- */
-export function getDirectSupporters(
-  unit: Unit,
-  units: Unit[]
-): Unit[] {
-  const supporters: Unit[] = [];
-  for (const u of units) {
-    if (u.isDefeated || u.id === unit.id || u.team !== unit.team) continue;
-    if (hexDistance(u.coord, unit.coord) <= 1 && getUnitAuraRank(u.rank) > 0) {
-      supporters.push(u);
-    }
-  }
-  return supporters;
-}
-
-/**
- * Returns opponent units with active aura (> 0) in proximity to a tile.
- */
-export function getOpponentAurasAtCoord(
-  team: Team,
-  tile: HexTile,
-  units: Unit[]
-): Unit[] {
-  const enemyTeam: Team = team === 'player' ? 'ai' : 'player';
-  const supporters: Unit[] = [];
-  for (const u of units) {
-    if (u.isDefeated || u.team !== enemyTeam) continue;
-    if (hexDistance(u.coord, tile) <= 1 && getUnitAuraRank(u.rank) > 0) {
-      supporters.push(u);
-    }
-  }
-  return supporters;
-}
-
-/**
- * Returns friendly units with active aura (> 0) in proximity to a tile.
- */
-export function getFriendlyAurasAtCoord(
-  team: Team,
-  tile: HexTile,
-  units: Unit[]
-): Unit[] {
-  const supporters: Unit[] = [];
-  for (const u of units) {
-    if (u.isDefeated || u.team !== team) continue;
-    if (hexDistance(u.coord, tile) <= 1 && getUnitAuraRank(u.rank) > 0) {
-      supporters.push(u);
-    }
-  }
-  return supporters;
-}
-
-/**
  * Calculates all legal moves for a given unit.
  *
  * Enforces:

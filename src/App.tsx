@@ -32,8 +32,6 @@ import {
   BookOpen,
   Volume2,
   VolumeX,
-  Eye,
-  EyeOff,
   Crown,
   Download,
   Route,
@@ -68,7 +66,6 @@ export default function App() {
   const [winner, setWinner] = useState<Team | null>(null);
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [showAuras, setShowAuras] = useState<boolean>(false);
   const [showLastMove, setShowLastMove] = useState<boolean>(true);
 
   // AI search budget per move (shorter while no captures are possible), variety margin,
@@ -481,19 +478,6 @@ export default function App() {
           <span className="text-xs hidden md:inline font-medium">Export</span>
         </button>
 
-        {/* Aura Threat Overlay Toggle */}
-        <button
-          onClick={() => setShowAuras((a) => !a)}
-          title={showAuras ? 'Hide Aura Threat Zones' : 'Show Aura Threat Zones'}
-          className={`p-2 rounded-xl border backdrop-blur-md shadow-xl transition-all ${
-            showAuras
-              ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50 shadow-cyan-500/10'
-              : 'bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800'
-          }`}
-        >
-          {showAuras ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-        </button>
-
         {/* Last Move Indicator Toggle */}
         <button
           onClick={() => setShowLastMove((v) => !v)}
@@ -567,7 +551,6 @@ export default function App() {
           legalMoves={legalMoves}
           currentTurn={currentTurn}
           isAiThinking={isAiThinking}
-          showAuras={showAuras}
           lastMove={displayLastMove}
           showLastMove={isReviewing || showLastMove}
           isGameOver={Boolean(winner)}
