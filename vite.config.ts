@@ -6,7 +6,8 @@ import { defineConfig, Plugin } from 'vite';
 
 /**
  * Dev-only relay for the remote opponent (src/utils/remoteOpponent.ts).
- * The page posts each position to .remote/state.txt (+ state.json with its token);
+ * The page posts each position to .remote/state.txt (+ state.json with its token, and
+ * position.json with the exact game state for scripts/remote-assist.mjs);
  * an outside agent answers by writing .remote/move.json: {"token": "...", "index": N}.
  */
 function remoteOpponentRelay(): Plugin {
@@ -24,10 +25,12 @@ function remoteOpponentRelay(): Plugin {
           let body = '';
           req.on('data', (chunk) => (body += chunk));
           req.on('end', () => {
-            const { token, text, moveCount } = JSON.parse(body);
+            const { token, text, moveCount, position } = JSON.parse(body);
             fs.mkdirSync(dir, { recursive: true });
             fs.rmSync(moveFile, { force: true });
             fs.writeFileSync(path.join(dir, 'state.txt'), `token: ${token}\n\n${text}\n`);
+            // Exact position for local tools; written before state.json, which is the "new turn" signal
+            fs.writeFileSync(path.join(dir, 'position.json'), JSON.stringify({ token, postedAt: Date.now(), ...position }));
             fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ token, moveCount }));
             res.statusCode = 204;
             res.end();

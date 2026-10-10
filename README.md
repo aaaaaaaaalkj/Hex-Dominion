@@ -18,6 +18,10 @@ npm run lint    # type check
 npm run build   # static site in dist/
 ```
 
+### Playing against an agent (dev server only)
+
+With the opponent switch set to **Claude**, every red turn is written to `.remote/` by the dev server: `state.txt` (text board, numbered legal moves, threat notes) and `position.json` (exact game state). An agent answers with `npm run remote:move -- <n>`. `npm run remote:watch` analyzes each new position with a timed search over the game's rules and prints the clocks, the top candidate moves and King-safety notes, one line per turn. None of this is part of the production build.
+
 The build is a static site with no backend: the AI runs in a Web Worker in the browser, and fonts are bundled.
 
 ## License

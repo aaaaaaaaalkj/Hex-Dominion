@@ -15,7 +15,7 @@ import { applyMove, computeInfluenceMap, countInfluencedTiles } from './utils/ga
 import { advanceTurn, applyAction, dominionMoveRank, EndReason, getActions, getUnitMoves } from './utils/gameState';
 import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
-import { buildRemoteSnapshot, pollRemoteMove, postRemoteState } from './utils/remoteOpponent';
+import { actionKey, buildRemoteSnapshot, pollRemoteMove, postRemoteState } from './utils/remoteOpponent';
 import {
   addIncrement,
   CLOCK_PRESETS,
@@ -182,7 +182,7 @@ export default function App() {
     setShowGameOverModal(true);
     setTurnNotice(null);
     const preset = clockPresetRef.current;
-    setClock(preset.baseMs > 0 ? startClock(preset, 'player', Date.now()) : null);
+    setClock(preset.baseMs > 0 ? startClock(preset) : null);
     soundEffects.playRoundChange();
   }, []);
 
@@ -460,7 +460,18 @@ export default function App() {
       : undefined;
     const text = buildRemoteSnapshot({ state, tiles, actions, history, clockLine });
 
-    postRemoteState(token, text, history.length)
+    const position = {
+      state,
+      actionKeys: actions.map(actionKey),
+      clock: c
+        ? {
+            ai: timeLeft(c, 'ai', Date.now()),
+            player: timeLeft(c, 'player', Date.now()),
+            incrementMs: clockPresetRef.current.incrementMs,
+          }
+        : null,
+    };
+    postRemoteState(token, text, history.length, position)
       .then(() => pollRemoteMove(token, abort.signal))
       .then((index) => {
         if (index === null || abort.signal.aborted) return;
@@ -544,10 +555,11 @@ export default function App() {
     };
   }, [opponent, currentTurn, gameEnded, turnTrigger]);
 
-  // Clock: run the side on turn; stop when the game ends
+  // Clock: run the side on turn once the first move is made; stop when the game ends
   useEffect(() => {
-    setClock((c) => (c ? switchClock(c, gameEnded ? null : currentTurn, Date.now()) : c));
-  }, [currentTurn, turnTrigger, gameEnded]);
+    const next = gameEnded || moveCount === 0 ? null : currentTurn;
+    setClock((c) => (c ? switchClock(c, next, Date.now()) : c));
+  }, [currentTurn, turnTrigger, gameEnded, moveCount]);
 
   // Clock: a side whose time runs out loses
   const handleTimeout = useCallback((loser: Team) => {

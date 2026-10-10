@@ -119,7 +119,7 @@ function describeOutcome(
   return notes.length ? ` => ${notes.join(' | ')}` : '';
 }
 
-function describeAction(mode: GameMode, action: GameAction, units: Unit[]): string {
+export function describeAction(mode: GameMode, action: GameAction, units: Unit[]): string {
   if (action.kind === 'pass') return 'PASS (no legal move)';
   const unit = units.find((u) => u.id === action.unitId)!;
   const { move } = action;
@@ -210,11 +210,30 @@ export function buildRemoteSnapshot(params: {
   return lines.join('\n');
 }
 
-export async function postRemoteState(token: string, text: string, moveCount: number): Promise<void> {
+// Stable identity of an action, so tools can map their own move list onto the page's indices
+export function actionKey(action: GameAction): string {
+  if (action.kind === 'pass') return 'pass';
+  const { target, facing } = action.move;
+  return `${action.unitId}>${target.q},${target.r}${facing !== undefined ? `/${facing}` : ''}`;
+}
+
+// Machine-readable position for local tools (scripts/remote-assist.mjs)
+export interface RemotePosition {
+  state: GameState;
+  actionKeys: string[];
+  clock: { ai: number; player: number; incrementMs: number } | null; // ms left when posted
+}
+
+export async function postRemoteState(
+  token: string,
+  text: string,
+  moveCount: number,
+  position: RemotePosition
+): Promise<void> {
   await fetch(`${REMOTE_ENDPOINT}/state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, text, moveCount }),
+    body: JSON.stringify({ token, text, moveCount, position }),
   });
 }
 

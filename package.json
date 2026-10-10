@@ -10,7 +10,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "remote:watch": "node scripts/remote-assist.mjs watch",
+    "remote:move": "node scripts/remote-assist.mjs move"
   },
   "dependencies": {
     "@fontsource-variable/cinzel": "^5.3.0",

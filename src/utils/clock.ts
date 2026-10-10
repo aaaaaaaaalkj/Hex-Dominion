@@ -24,8 +24,9 @@ export interface ClockState {
   since: number; // timestamp (ms) when the running side's time started counting
 }
 
-export function startClock(preset: ClockPreset, firstToMove: Team, now: number): ClockState {
-  return { remaining: { player: preset.baseMs, ai: preset.baseMs }, running: firstToMove, since: now };
+// A fresh clock is stopped: it starts with the first move, like a chess clock
+export function startClock(preset: ClockPreset): ClockState {
+  return { remaining: { player: preset.baseMs, ai: preset.baseMs }, running: null, since: 0 };
 }
 
 // Time left for `team` at `now`, counting the running side's elapsed time
