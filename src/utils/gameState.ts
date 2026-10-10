@@ -1,4 +1,4 @@
-import { GameMode, HexTile, LegalMove, Team, Unit } from '../types/game';
+import { GameMode, HexTile, LegalMove, Team, Unit, UnitRank } from '../types/game';
 import { applyMove, calculateLegalMovesForUnit, hasAnyLegalMoves } from './gameRules';
 import { applyGambitMove, calculateGambitMoves, hasAnyGambitMove, isKingInCheck } from './gambitRules';
 
@@ -92,6 +92,26 @@ export function advanceTurn(
 }
 
 /**
+ * Dominion rank order: among a side's unmoved units that have a legal move, only
+ * those of the highest rank may move (King, then Generals, Captains, Scouts).
+ * Evaluated before every action, so a unit that is blocked now must still move
+ * later in the round once it can. Null when the side has no legal move at all.
+ */
+export function dominionMoveRank(
+  team: Team,
+  tiles: Map<string, HexTile>,
+  units: Unit[]
+): UnitRank | null {
+  let best: UnitRank | null = null;
+  for (const unit of units) {
+    if (unit.team !== team || unit.isDefeated || unit.hasMovedThisRound) continue;
+    if (best !== null && unit.rank <= best) continue;
+    if (calculateLegalMovesForUnit(unit, tiles, units).length > 0) best = unit.rank;
+  }
+  return best;
+}
+
+/**
  * All actions available to the side to move.
  */
 export function getActions(state: GameState, tiles: Map<string, HexTile>): GameAction[] {
@@ -108,9 +128,11 @@ export function getActions(state: GameState, tiles: Map<string, HexTile>): GameA
     return actions; // never empty: a side without moves is already mated or stalemated
   }
 
+  const rank = dominionMoveRank(state.currentTurn, tiles, state.units);
   const actions: GameAction[] = [];
   for (const unit of state.units) {
-    if (unit.team !== state.currentTurn || unit.isDefeated || unit.hasMovedThisRound) continue;
+    if (unit.team !== state.currentTurn || unit.isDefeated || unit.rank !== rank) continue;
+    if (unit.hasMovedThisRound) continue;
     for (const move of calculateLegalMovesForUnit(unit, tiles, state.units)) {
       actions.push({ kind: 'move', unitId: unit.id, move });
     }

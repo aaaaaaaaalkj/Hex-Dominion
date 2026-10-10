@@ -2,7 +2,7 @@
 
 Turn-based strategy on a 61-hex board against a search-based AI, with two rulesets:
 
-- **Dominion**: rank-based combat and influence. Units project influence onto nearby tiles, attack and defense add up the ranks of adjacent allies, and every unit moves once per round.
+- **Dominion**: rank-based combat and influence. Units project influence onto nearby tiles, attack and defense add up the ranks of adjacent allies, and every unit moves once per round, in rank order (King first, Scouts last).
 - **Gambit**: chess-like rules on the hex board: King, Rooks, Bishops and pawn-like Scouts, alternating turns, checkmate wins.
 
 The full rules are in the in-game rules codex (book icon).

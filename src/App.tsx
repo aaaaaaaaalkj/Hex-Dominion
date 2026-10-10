@@ -12,7 +12,7 @@ import {
 } from './types/game';
 import { generateGameMap } from './utils/mapGenerator';
 import { applyMove, computeInfluenceMap, countInfluencedTiles } from './utils/gameRules';
-import { advanceTurn, applyAction, EndReason, getUnitMoves } from './utils/gameState';
+import { advanceTurn, applyAction, dominionMoveRank, EndReason, getUnitMoves } from './utils/gameState';
 import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
 import { soundEffects } from './utils/soundEffects';
@@ -145,15 +145,25 @@ export default function App() {
     soundEffects.enabled = soundEnabled;
   }, [soundEnabled]);
 
+  // Dominion: only the highest-ranked units that can move may move now
+  const moveRank = useMemo(
+    () => (mode === 'dominion' ? dominionMoveRank(currentTurn, tiles, units) : null),
+    [mode, currentTurn, tiles, units]
+  );
+  const movesOf = useCallback(
+    (unit: Unit) =>
+      mode === 'dominion' && unit.rank !== moveRank ? [] : getUnitMoves(mode, unit, tiles, units),
+    [mode, moveRank, tiles, units]
+  );
+
   // Recalculate legal moves whenever selected unit changes or units change
   useEffect(() => {
     if (!selectedUnit || selectedUnit.hasMovedThisRound || selectedUnit.isDefeated) {
       setLegalMoves([]);
       return;
     }
-    const moves = getUnitMoves(mode, selectedUnit, tiles, units);
-    setLegalMoves(moves);
-  }, [mode, selectedUnit, tiles, units]);
+    setLegalMoves(movesOf(selectedUnit));
+  }, [selectedUnit, movesOf]);
 
   // Check if round should transition or initiative should switch
   const evaluateNextTurn = useCallback(
@@ -318,7 +328,7 @@ export default function App() {
         return;
       }
 
-      const moves = getUnitMoves(mode, unit, tiles, units);
+      const moves = movesOf(unit);
 
       // Units without legal moves can still be selected to preview lifting their influence
       if (selectedUnit?.id === unit.id) {
@@ -331,7 +341,7 @@ export default function App() {
       setLegalMoves(moves);
       soundEffects.playSelect();
     },
-    [mode, currentTurn, isAiThinking, gameEnded, selectedUnit, tiles, units]
+    [currentTurn, isAiThinking, gameEnded, selectedUnit, movesOf]
   );
 
   // Player executes move on target hex
@@ -551,12 +561,19 @@ export default function App() {
                     ? legalMoves.length === 0
                       ? (
                         <span className="text-slate-400">
-                          {getPieceName(mode, selectedUnit.rank)} · no legal moves
+                          {getPieceName(mode, selectedUnit.rank)} ·{' '}
+                          {mode === 'dominion' && moveRank !== null && selectedUnit.rank < moveRank
+                            ? moveRank === 4
+                              ? 'your King moves first'
+                              : `${UNIT_DEFINITIONS[moveRank].name}s move first`
+                            : 'no legal moves'}
                         </span>
                       )
                       : mode === 'gambit'
                       ? getPieceName(mode, selectedUnit.rank)
                       : `${UNIT_DEFINITIONS[selectedUnit.rank].name} (Moves ${UNIT_DEFINITIONS[selectedUnit.rank].speed} · Aura ${UNIT_DEFINITIONS[selectedUnit.rank].auraRank})`
+                    : mode === 'dominion' && moveRank !== null
+                    ? `Your Turn · move ${moveRank === 4 ? 'your' : 'a'} ${UNIT_DEFINITIONS[moveRank].name}`
                     : 'Your Turn'
                   : 'AI thinking...'}
                 {sideToMoveInCheck && <span className="ml-1.5 font-bold text-rose-400">Check!</span>}

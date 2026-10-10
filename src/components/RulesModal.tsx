@@ -274,6 +274,12 @@ export const RulesModal: React.FC<RulesModalProps> = ({ mode, isOpen, onClose })
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                 <span>
+                  <strong>Rank Order:</strong> Within a round, units move by rank: the King first, then Generals, Captains and Scouts last. On each of your turns you must move one of your highest-ranked units that can still move this round; any unit of that rank may be chosen. A unit that is blocked must move later in the round once it is freed, ahead of any lower-ranked unit.
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                <span>
                   <strong>Wait Condition:</strong> A player who has already moved all their available units for the round must wait until their opponent finishes moving their remaining units.
                 </span>
               </li>
