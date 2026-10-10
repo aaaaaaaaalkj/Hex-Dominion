@@ -6,13 +6,15 @@
  *   node scripts/remote-assist.mjs move <n>   answer the current position with legal move n
  *
  * `watch` prints one line per turn: the clocks, the best candidate moves from a timed
- * alpha-beta search over the game's own rules, and King-safety notes. The search only
+ * alpha-beta search (Dominion: the vector engine in lib/vector-engine.mjs; Gambit: the
+ * game's own rules), and King-safety notes. The search only
  * advises; the agent still chooses the move. Full results go to .remote/analysis.txt.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
+import * as V from './lib/vector-engine.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, '.remote');
@@ -180,7 +182,18 @@ function handle(position) {
   // Leave time for reading and answering: about 1/30 of the bank, 0.8 to 4 seconds
   const budget = clock ? Math.min(4000, Math.max(800, (clock.ai - 20_000) / 30)) : 6000;
   const t0 = Date.now();
-  const { ranked, depth, nodes } = analyze(state, tiles, budget);
+  let ranked, depth, nodes;
+  if (state.mode === 'dominion') {
+    // Vector engine (scripts/lib/vector-engine.mjs): same rules, much faster search
+    const keyOf = (a) => (a.kind === 'pass' ? 'pass' : `${state.units.find((u) => u.id === a.unitId).coord.q},${state.units.find((u) => u.id === a.unitId).coord.r}>${a.move.target.q},${a.move.target.r}`);
+    const byKey = new Map(ours.map((action, index) => [keyOf(action), { action, index }]));
+    const vecKey = (m) => (m === V.PASS ? 'pass' : `${V.moveFrom(m).q},${V.moveFrom(m).r}>${V.moveTo(m).q},${V.moveTo(m).r}`);
+    const result = V.analyze(V.fromGameState(state), budget);
+    ranked = result.ranked.map((e) => ({ ...byKey.get(vecKey(e.move)), score: e.score }));
+    ({ depth, nodes } = result);
+  } else {
+    ({ ranked, depth, nodes } = analyze(state, tiles, budget));
+  }
   const describe = (entry) => `${entry.index}: ${describeAction(state.mode, entry.action, state.units)} [${fmtScore(entry.score)}]`;
 
   let kings = '';
