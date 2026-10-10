@@ -12,9 +12,10 @@ import {
 } from './types/game';
 import { generateGameMap } from './utils/mapGenerator';
 import { applyMove, computeInfluenceMap, countInfluencedTiles } from './utils/gameRules';
-import { advanceTurn, applyAction, dominionMoveRank, EndReason, getUnitMoves } from './utils/gameState';
+import { advanceTurn, applyAction, dominionMoveRank, EndReason, getActions, getUnitMoves } from './utils/gameState';
 import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
+import { buildRemoteSnapshot, pollRemoteMove, postRemoteState } from './utils/remoteOpponent';
 import { soundEffects } from './utils/soundEffects';
 import { generateGameLogText, downloadGameLog } from './utils/gameExporter';
 import { HexBoard } from './components/HexBoard';
@@ -32,6 +33,21 @@ import {
 } from 'lucide-react';
 
 const MODE_STORAGE_KEY = 'hexdominion-mode';
+const OPPONENT_STORAGE_KEY = 'hexdominion-opponent';
+
+// Who plays red: the built-in search AI, or Claude through the dev server relay
+type Opponent = 'ai' | 'claude';
+const OPPONENT_NAMES: Record<Opponent, string> = { ai: 'Search AI', claude: 'Claude' };
+// The relay only exists on the dev server (vite.config.ts)
+const REMOTE_AVAILABLE = import.meta.env.DEV;
+
+function loadSavedOpponent(): Opponent {
+  try {
+    return REMOTE_AVAILABLE && localStorage.getItem(OPPONENT_STORAGE_KEY) === 'claude' ? 'claude' : 'ai';
+  } catch {
+    return 'ai';
+  }
+}
 
 function loadSavedMode(): GameMode {
   try {
@@ -46,6 +62,8 @@ export default function App() {
   const [mode, setMode] = useState<GameMode>(loadSavedMode);
   const modeRef = React.useRef(mode);
   modeRef.current = mode;
+  const [opponent, setOpponent] = useState<Opponent>(loadSavedOpponent);
+  const opponentName = REMOTE_AVAILABLE && opponent === 'claude' ? 'Claude' : 'The AI';
 
   // Game Board State
   const [tiles, setTiles] = useState<Map<string, HexTile>>(() => new Map());
@@ -100,6 +118,8 @@ export default function App() {
   unitsRef.current = units;
   const roundNumberRef = React.useRef(roundNumber);
   roundNumberRef.current = roundNumber;
+  const moveHistoryRef = React.useRef(moveHistory);
+  moveHistoryRef.current = moveHistory;
 
   // Start a fresh match with the given ruleset
   const startMatch = useCallback((nextMode: GameMode) => {
@@ -165,6 +185,9 @@ export default function App() {
     setLegalMoves(movesOf(selectedUnit));
   }, [selectedUnit, movesOf]);
 
+  const opponentNameRef = React.useRef(opponentName);
+  opponentNameRef.current = opponentName;
+
   // Check if round should transition or initiative should switch
   const evaluateNextTurn = useCallback(
     (
@@ -182,8 +205,8 @@ export default function App() {
       if (next.waiting) {
         setTurnNotice(
           next.waiting === 'player'
-            ? 'None of your remaining units can move · the AI continues'
-            : 'The AI has no legal moves · you continue'
+            ? `None of your remaining units can move · ${opponentNameRef.current} continues`
+            : `${opponentNameRef.current} has no legal moves · you continue`
         );
       }
 
@@ -375,9 +398,56 @@ export default function App() {
     return () => worker.terminate();
   }, []);
 
+  // Claude's turn: post the position to the dev server relay and wait for its answer
+  useEffect(() => {
+    // REMOTE_AVAILABLE is a build-time constant: production builds drop this effect
+    if (!REMOTE_AVAILABLE || opponent !== 'claude' || currentTurn !== 'ai' || gameEnded) return;
+
+    setIsAiThinking(true);
+    const tiles = tilesRef.current;
+    const units = unitsRef.current;
+    const state = {
+      mode: modeRef.current,
+      units,
+      currentTurn: 'ai' as Team,
+      roundNumber: roundNumberRef.current,
+      winner: null,
+      quietMoves: quietMovesRef.current,
+    };
+    const actions = getActions(state, tiles);
+    const history = moveHistoryRef.current;
+    const token = `${Date.now().toString(36)}-${history.length}`;
+    const abort = new AbortController();
+
+    const text = buildRemoteSnapshot({ state, tiles, actions, history });
+
+    postRemoteState(token, text, history.length)
+      .then(() => pollRemoteMove(token, abort.signal))
+      .then((index) => {
+        if (index === null || abort.signal.aborted) return;
+        const action = actions[index];
+        const actingUnit =
+          action?.kind === 'move' ? unitsRef.current.find((u) => u.id === action.unitId) : undefined;
+        if (action?.kind === 'move' && actingUnit) {
+          executeMoveRef.current(actingUnit, action.move);
+        } else if (action?.kind === 'pass') {
+          evaluateNextTurnRef.current('ai', tilesRef.current, unitsRef.current);
+        } else {
+          console.error(`Claude sent an invalid move index: ${index}`);
+          setTurnTrigger((t) => t + 1); // re-post the position
+          return;
+        }
+        setIsAiThinking(false);
+      })
+      .catch((err) => console.error('Remote opponent relay failed', err));
+
+    return () => abort.abort();
+  }, [opponent, currentTurn, gameEnded, turnTrigger]);
+
   // AI Turn Execution Loop
   useEffect(() => {
     const worker = aiWorkerRef.current;
+    if (opponent !== 'ai') return;
     if (currentTurn !== 'ai' || gameEnded || !worker) {
       setIsAiThinking(false);
       return;
@@ -433,7 +503,7 @@ export default function App() {
       worker.removeEventListener('message', onMessage);
       clearTimeout(applyTimer);
     };
-  }, [currentTurn, gameEnded, turnTrigger]);
+  }, [opponent, currentTurn, gameEnded, turnTrigger]);
 
   // Statistics & Score tracking
   const stats = useMemo(() => {
@@ -575,7 +645,7 @@ export default function App() {
                     : mode === 'dominion' && moveRank !== null
                     ? `Your Turn · move ${moveRank === 4 ? 'your' : 'a'} ${UNIT_DEFINITIONS[moveRank].name}`
                     : 'Your Turn'
-                  : 'AI thinking...'}
+                  : `${opponentName} thinking...`}
                 {sideToMoveInCheck && <span className="ml-1.5 font-bold text-rose-400">Check!</span>}
               </>
             )}
@@ -600,6 +670,32 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        {/* Opponent Switch (dev server only: Claude plays through the relay) */}
+        {REMOTE_AVAILABLE && (
+          <div className="flex items-center p-0.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl text-xs font-semibold">
+            {(['ai', 'claude'] as Opponent[]).map((o) => (
+              <button
+                key={o}
+                onClick={() => {
+                  if (o === opponent) return;
+                  setOpponent(o);
+                  try {
+                    localStorage.setItem(OPPONENT_STORAGE_KEY, o);
+                  } catch {
+                    // Persisting the opponent is only a convenience
+                  }
+                }}
+                title={o === 'claude' ? 'Claude plays red from a Claude Code session via .remote/' : 'Built-in search AI plays red'}
+                className={`px-2.5 py-1 rounded-lg transition-colors ${
+                  o === opponent ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {OPPONENT_NAMES[o]}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Subtle New Match Button */}
         <button
