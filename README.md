@@ -7,6 +7,8 @@ Turn-based strategy on a 61-hex board against a search-based AI, with two rulese
 
 The full rules are in the in-game rules codex (book icon).
 
+Matches can be played with a chess clock (5 minutes + 10 seconds per move, timer button); running out of time loses the game.
+
 ## Development
 
 ```sh

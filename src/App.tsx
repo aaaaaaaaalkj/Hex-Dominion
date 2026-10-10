@@ -16,10 +16,20 @@ import { advanceTurn, applyAction, dominionMoveRank, EndReason, getActions, getU
 import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
 import { buildRemoteSnapshot, pollRemoteMove, postRemoteState } from './utils/remoteOpponent';
+import {
+  addIncrement,
+  CLOCK_PRESETS,
+  ClockState,
+  formatClock,
+  startClock,
+  switchClock,
+  timeLeft,
+} from './utils/clock';
 import { soundEffects } from './utils/soundEffects';
 import { generateGameLogText, downloadGameLog } from './utils/gameExporter';
 import { HexBoard } from './components/HexBoard';
 import { RulesModal } from './components/RulesModal';
+import { GameClock } from './components/GameClock';
 import { GameOverModal } from './components/GameOverModal';
 import { ReplayControls } from './components/ReplayControls';
 import {
@@ -30,6 +40,7 @@ import {
   Crown,
   Download,
   Route,
+  Timer,
 } from 'lucide-react';
 
 const MODE_STORAGE_KEY = 'hexdominion-mode';
@@ -46,6 +57,17 @@ function loadSavedOpponent(): Opponent {
     return REMOTE_AVAILABLE && localStorage.getItem(OPPONENT_STORAGE_KEY) === 'claude' ? 'claude' : 'ai';
   } catch {
     return 'ai';
+  }
+}
+
+const CLOCK_STORAGE_KEY = 'hexdominion-clock';
+
+function loadSavedClockPreset(): string {
+  try {
+    const saved = localStorage.getItem(CLOCK_STORAGE_KEY);
+    return CLOCK_PRESETS.some((p) => p.id === saved) ? saved! : '5+10';
+  } catch {
+    return '5+10';
   }
 }
 
@@ -121,6 +143,15 @@ export default function App() {
   const moveHistoryRef = React.useRef(moveHistory);
   moveHistoryRef.current = moveHistory;
 
+  // Game clock (null when playing without one)
+  const [clockPresetId, setClockPresetId] = useState<string>(loadSavedClockPreset);
+  const clockPreset = CLOCK_PRESETS.find((p) => p.id === clockPresetId) ?? CLOCK_PRESETS[0];
+  const clockPresetRef = React.useRef(clockPreset);
+  clockPresetRef.current = clockPreset;
+  const [clock, setClock] = useState<ClockState | null>(null);
+  const clockRef = React.useRef(clock);
+  clockRef.current = clock;
+
   // Start a fresh match with the given ruleset
   const startMatch = useCallback((nextMode: GameMode) => {
     const { tiles: newTiles, units: newUnits } = generateGameMap(nextMode);
@@ -150,6 +181,8 @@ export default function App() {
     setLastMove(null);
     setShowGameOverModal(true);
     setTurnNotice(null);
+    const preset = clockPresetRef.current;
+    setClock(preset.baseMs > 0 ? startClock(preset, 'player', Date.now()) : null);
     soundEffects.playRoundChange();
   }, []);
 
@@ -220,6 +253,8 @@ export default function App() {
   const executeMove = useCallback(
     (unit: Unit, move: LegalMove) => {
       const fromCoord = { ...unit.coord };
+      const incrementMs = clockPresetRef.current.incrementMs;
+      setClock((c) => (c ? addIncrement(switchClock(c, null, Date.now()), unit.team, incrementMs) : c));
 
       if (mode === 'gambit') {
         const next = applyAction(
@@ -419,7 +454,11 @@ export default function App() {
     const token = `${Date.now().toString(36)}-${history.length}`;
     const abort = new AbortController();
 
-    const text = buildRemoteSnapshot({ state, tiles, actions, history });
+    const c = clockRef.current;
+    const clockLine = c
+      ? `Clock: you ${formatClock(timeLeft(c, 'ai', Date.now()))}, Blue ${formatClock(timeLeft(c, 'player', Date.now()))} (+${clockPresetRef.current.incrementMs / 1000}s per move). Your clock is running.`
+      : undefined;
+    const text = buildRemoteSnapshot({ state, tiles, actions, history, clockLine });
 
     postRemoteState(token, text, history.length)
       .then(() => pollRemoteMove(token, abort.signal))
@@ -504,6 +543,37 @@ export default function App() {
       clearTimeout(applyTimer);
     };
   }, [opponent, currentTurn, gameEnded, turnTrigger]);
+
+  // Clock: run the side on turn; stop when the game ends
+  useEffect(() => {
+    setClock((c) => (c ? switchClock(c, gameEnded ? null : currentTurn, Date.now()) : c));
+  }, [currentTurn, turnTrigger, gameEnded]);
+
+  // Clock: a side whose time runs out loses
+  const handleTimeout = useCallback((loser: Team) => {
+    setClock((c) => (c ? switchClock(c, null, Date.now()) : c));
+    setWinner(loser === 'player' ? 'ai' : 'player');
+    setEndReason('timeout');
+    setShowGameOverModal(true);
+    setSelectedUnit(null);
+    setLegalMoves([]);
+    if (loser === 'ai') soundEffects.playVictory();
+    else soundEffects.playDefeat();
+  }, []);
+
+  const changeClockPreset = useCallback(
+    (id: string) => {
+      setClockPresetId(id);
+      clockPresetRef.current = CLOCK_PRESETS.find((p) => p.id === id) ?? CLOCK_PRESETS[0];
+      try {
+        localStorage.setItem(CLOCK_STORAGE_KEY, id);
+      } catch {
+        // Persisting the clock is only a convenience
+      }
+      startMatch(modeRef.current); // a new time control starts a new match
+    },
+    [startMatch]
+  );
 
   // Statistics & Score tracking
   const stats = useMemo(() => {
@@ -653,6 +723,9 @@ export default function App() {
         </div>
       </div>
 
+      {/* 1.5 CLOCKS (when playing with a time control) */}
+      {clock && <GameClock clock={clock} onTimeout={handleTimeout} />}
+
       {/* 2. TOP RIGHT FLOATING CONTROLS: Utility Buttons */}
       <div className="absolute top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto">
         {/* Game Mode Switch (starts a new match in the chosen ruleset) */}
@@ -696,6 +769,19 @@ export default function App() {
             ))}
           </div>
         )}
+
+        {/* Time control (switching starts a new match) */}
+        <button
+          onClick={() => {
+            const i = CLOCK_PRESETS.findIndex((p) => p.id === clockPreset.id);
+            changeClockPreset(CLOCK_PRESETS[(i + 1) % CLOCK_PRESETS.length].id);
+          }}
+          title={`Time control: ${clockPreset.label} (click to change; starts a new match)`}
+          className="px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 backdrop-blur-md shadow-xl transition-all flex items-center gap-1.5"
+        >
+          <Timer className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{clockPreset.baseMs > 0 ? clockPreset.id : 'Off'}</span>
+        </button>
 
         {/* Subtle New Match Button */}
         <button

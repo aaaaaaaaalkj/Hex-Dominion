@@ -148,8 +148,9 @@ export function buildRemoteSnapshot(params: {
   tiles: Map<string, HexTile>;
   actions: GameAction[];
   history: MoveRecord[];
+  clockLine?: string;
 }): string {
-  const { state, tiles, actions, history } = params;
+  const { state, tiles, actions, history, clockLine } = params;
   const { mode, roundNumber, units } = state;
   const inCheck = mode === 'gambit' && isKingInCheck(state.currentTurn, tiles, units);
   const isGambit = mode === 'gambit';
@@ -160,6 +161,7 @@ export function buildRemoteSnapshot(params: {
   lines.push(`Letters: ${Object.entries(LETTERS[mode]).reverse().map(([rank, l]) => `${l}=${getPieceName(mode, Number(rank) as 1)}`).join(' ')}`);
   lines.push('Directions: E=(+1,0) NE=(+1,-1) NW=(0,-1) W=(-1,0) SW=(-1,+1) SE=(0,+1)');
   if (!isGambit) lines.push('Rank order: only your highest-ranked units that can still move this round may move.');
+  if (clockLine) lines.push(clockLine);
   if (inCheck) lines.push('*** Your King is in CHECK ***');
   lines.push('');
   lines.push(...renderBoard(mode, tiles, units));

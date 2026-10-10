@@ -37,7 +37,9 @@ export function generateGameLogText(data: GameExportData): string {
 
   const isGambit = mode === 'gambit';
   const how =
-    endReason === 'checkmate'
+    endReason === 'timeout'
+      ? 'Time Forfeit'
+      : endReason === 'checkmate'
       ? 'Checkmate'
       : endReason === 'stalemate'
       ? 'Stalemate'

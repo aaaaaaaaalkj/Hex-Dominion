@@ -52,7 +52,11 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
 
   const title = isDraw ? 'Draw' : isPlayerWinner ? 'Glorious Victory' : 'Defeat in Battle';
   const subtitle =
-    endReason === 'stalemate'
+    endReason === 'timeout'
+      ? isPlayerWinner
+        ? 'Your opponent ran out of time.'
+        : 'You ran out of time.'
+      : endReason === 'stalemate'
       ? 'Stalemate: the side to move has no legal move but is not in check.'
       : endReason === 'no-captures'
       ? 'No piece was captured in 100 moves.'

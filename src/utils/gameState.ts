@@ -5,7 +5,7 @@ import { applyGambitMove, calculateGambitMoves, hasAnyGambitMove, isKingInCheck 
 // Gambit: a draw is declared after this many consecutive moves without a capture
 export const GAMBIT_QUIET_MOVE_LIMIT = 100;
 
-export type EndReason = 'king-captured' | 'checkmate' | 'stalemate' | 'no-captures';
+export type EndReason = 'king-captured' | 'checkmate' | 'stalemate' | 'no-captures' | 'timeout';
 
 /**
  * Pure, immutable game-state model shared by the UI and the AI search.
