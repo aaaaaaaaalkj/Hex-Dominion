@@ -6,7 +6,7 @@
  *   node scripts/remote-assist.mjs move <n>   answer the current position with legal move n
  *
  * `watch` prints one line per turn: the clocks, the best candidate moves from a timed
- * alpha-beta search (Dominion: the vector engine in lib/vector-engine.mjs; Gambit: the
+ * alpha-beta search (Dominion: the vector engine in src/utils/vectorEngine.ts; Gambit: the
  * game's own rules), and King-safety notes. The search only
  * advises; the agent still chooses the move. Full results go to .remote/analysis.txt.
  */
@@ -14,7 +14,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
-import * as V from './lib/vector-engine.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, '.remote');
@@ -63,6 +62,7 @@ const { getActions, applyAction, opponentOf } = await load('/src/utils/gameState
 const { calculateLegalMovesForUnit, computeInfluenceMap, countInfluencedTiles } = await load('/src/utils/gameRules.ts');
 const { describeAction, actionKey } = await load('/src/utils/remoteOpponent.ts');
 const { formatClock } = await load('/src/utils/clock.ts');
+const V = await load('/src/utils/vectorEngine.ts');
 
 const ME = 'ai';
 const WIN = 1_000_000;
@@ -184,7 +184,7 @@ function handle(position) {
   const t0 = Date.now();
   let ranked, depth, nodes;
   if (state.mode === 'dominion') {
-    // Vector engine (scripts/lib/vector-engine.mjs): same rules, much faster search
+    // Vector engine (src/utils/vectorEngine.ts): same rules, much faster search
     const keyOf = (a) => (a.kind === 'pass' ? 'pass' : `${state.units.find((u) => u.id === a.unitId).coord.q},${state.units.find((u) => u.id === a.unitId).coord.r}>${a.move.target.q},${a.move.target.r}`);
     const byKey = new Map(ours.map((action, index) => [keyOf(action), { action, index }]));
     const vecKey = (m) => (m === V.PASS ? 'pass' : `${V.moveFrom(m).q},${V.moveFrom(m).r}>${V.moveTo(m).q},${V.moveTo(m).r}`);

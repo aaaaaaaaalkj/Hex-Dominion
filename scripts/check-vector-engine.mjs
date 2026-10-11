@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Differential test: plays random Dominion games with the app's engine and checks
- * that scripts/lib/vector-engine.mjs produces the same legal moves and the same
+ * that src/utils/vectorEngine.ts produces the same legal moves and the same
  * next state (units, moved flags, side to move, round, winner, influence, hash)
  * at every step.
  *
@@ -10,7 +10,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
-import * as V from './lib/vector-engine.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const server = await createServer({
@@ -23,6 +22,7 @@ const server = await createServer({
 const { generateGameMap } = await server.ssrLoadModule('/src/utils/mapGenerator.ts');
 const { getActions, applyAction } = await server.ssrLoadModule('/src/utils/gameState.ts');
 const { computeInfluenceMap } = await server.ssrLoadModule('/src/utils/gameRules.ts');
+const V = await server.ssrLoadModule('/src/utils/vectorEngine.ts');
 
 const games = Number(process.argv[2] ?? 40);
 let seed = 12345;

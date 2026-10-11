@@ -1,6 +1,7 @@
 import { HexTile } from '../types/game';
 import { chooseAIAction, SearchOptions, SearchResult } from './aiEngine';
 import { GameState } from './gameState';
+import { chooseDominionAction } from './vectorEngine';
 
 export interface AIRequest {
   requestId: number;
@@ -20,8 +21,11 @@ const scope = self as unknown as {
   postMessage: (message: AIResponse) => void;
 };
 
-// Runs the search off the main thread so the board stays responsive while the AI thinks
+// Runs the search off the main thread so the board stays responsive while the AI thinks.
+// Dominion uses the vector-model engine, Gambit the object-model search.
 scope.onmessage = (e) => {
   const { requestId, state, tiles, options } = e.data;
-  scope.postMessage({ requestId, result: chooseAIAction(state, tiles, options) });
+  const result: SearchResult | null =
+    state.mode === 'dominion' ? chooseDominionAction(state, tiles, options) : chooseAIAction(state, tiles, options);
+  scope.postMessage({ requestId, result });
 };
