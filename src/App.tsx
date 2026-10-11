@@ -123,6 +123,23 @@ export default function App() {
 
   // Modals & Settings
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
+
+  // On narrow screens the header stacks over the board; measure it so the board can sit below it
+  const headerRef = React.useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const wide = window.matchMedia('(min-width: 1280px)');
+    const measure = () => setHeaderHeight(wide.matches ? 0 : el.offsetTop + el.offsetHeight);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    wide.addEventListener('change', measure);
+    return () => {
+      observer.disconnect();
+      wide.removeEventListener('change', measure);
+    };
+  }, []);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [showLastMove, setShowLastMove] = useState<boolean>(true);
 
@@ -680,8 +697,14 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 select-none">
+      {/* HEADER: stacks on narrow screens, splits left/right on wide ones */}
+      <div
+        ref={headerRef}
+        className="absolute top-3 inset-x-3 sm:top-4 sm:inset-x-4 z-30 flex flex-col xl:flex-row xl:items-start xl:justify-between gap-2 pointer-events-none"
+      >
+      <div className="flex flex-col items-start gap-2 min-w-0">
       {/* 1. TOP FLOATING ISLAND: Title & Status */}
-      <div className="absolute top-4 left-4 z-30 flex items-center gap-3 p-2 px-3.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl pointer-events-auto">
+      <div className="max-w-full flex items-center gap-3 p-2 px-3.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl pointer-events-auto">
         <span className="font-display font-bold text-sm tracking-wider text-slate-200">
           HexDominion
         </span>
@@ -735,11 +758,38 @@ export default function App() {
         </div>
       </div>
 
+      {/* 1.25 INFLUENCE RATIO BAR (Dominion only; centered at the top on very wide screens) */}
+      {mode === 'dominion' && (
+      <div className="2xl:absolute 2xl:top-0 2xl:left-1/2 2xl:-translate-x-1/2 z-20 flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-md text-[11px] font-mono tabular-nums shadow-lg">
+        <div className="flex items-center gap-1.5 text-cyan-400">
+          <Crown className="w-3.5 h-3.5" />
+          <span>{barStats.playerInfluencePct}%</span>
+        </div>
+
+        <div className="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
+          <div
+            style={{ width: `${barStats.playerInfluencePct}%` }}
+            className="bg-cyan-500 transition-all duration-300"
+          />
+          <div
+            style={{ width: `${barStats.aiInfluencePct}%` }}
+            className="bg-rose-500 transition-all duration-300 ml-auto"
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 text-rose-400">
+          <span>{barStats.aiInfluencePct}%</span>
+          <Crown className="w-3.5 h-3.5" />
+        </div>
+      </div>
+      )}
+
       {/* 1.5 CLOCKS (when playing with a time control) */}
       {clock && <GameClock clock={clock} onTimeout={handleTimeout} />}
+      </div>
 
       {/* 2. TOP RIGHT FLOATING CONTROLS: Utility Buttons */}
-      <div className="absolute top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto">
+      <div className="flex flex-wrap items-center xl:justify-end gap-2 pointer-events-auto">
         {/* Game Mode Switch (starts a new match in the chosen ruleset) */}
         <div className="flex items-center p-0.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl text-xs font-semibold">
           {(['dominion', 'gambit'] as GameMode[]).map((m) => (
@@ -798,10 +848,11 @@ export default function App() {
         {/* Subtle New Match Button */}
         <button
           onClick={() => initGame()}
-          className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 backdrop-blur-md shadow-xl transition-all flex items-center gap-1.5"
+          title="New Match"
+          className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 backdrop-blur-md shadow-xl transition-all flex items-center gap-1.5"
         >
           <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
-          <span>New Match</span>
+          <span className="hidden sm:inline">New Match</span>
         </button>
 
         {/* Export Game Log Button */}
@@ -846,42 +897,23 @@ export default function App() {
         </button>
       </div>
 
-      {/* 3. TOP CENTER INFLUENCE RATIO BAR (Dominion only) */}
-      {mode === 'dominion' && (
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800/80 backdrop-blur-md text-[11px] font-mono tabular-nums shadow-lg pointer-events-none">
-        <div className="flex items-center gap-1.5 text-cyan-400">
-          <Crown className="w-3.5 h-3.5" />
-          <span>{barStats.playerInfluencePct}%</span>
-        </div>
-
-        <div className="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
-          <div
-            style={{ width: `${barStats.playerInfluencePct}%` }}
-            className="bg-cyan-500 transition-all duration-300"
-          />
-          <div
-            style={{ width: `${barStats.aiInfluencePct}%` }}
-            className="bg-rose-500 transition-all duration-300 ml-auto"
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5 text-rose-400">
-          <span>{barStats.aiInfluencePct}%</span>
-          <Crown className="w-3.5 h-3.5" />
-        </div>
       </div>
-      )}
 
       {/* 3.5 TURN NOTICE (e.g. one side has no legal move and the other continues) */}
       {turnNotice && !gameEnded && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 backdrop-blur-md shadow-lg text-xs text-slate-300 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-none">
+        <div
+          style={{ top: headerHeight ? headerHeight + 8 : undefined }}
+          className="absolute top-16 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] text-center px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 backdrop-blur-md shadow-lg text-xs text-slate-300 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-none">
           {turnNotice}
         </div>
       )}
 
       {/* 4. MAIN FULLSCREEN HEX BOARD (Pure GPU-accelerated SVG) */}
       {/* While reviewing, leave room at the bottom for the replay controller */}
-      <div className={`w-full h-full ${isReviewing ? 'pb-28' : ''}`}>
+      <div
+        style={{ paddingTop: headerHeight || undefined }}
+        className={`w-full h-full ${isReviewing ? 'pb-28' : ''}`}
+      >
         <HexBoard
           mode={mode}
           tiles={tiles}

@@ -29,7 +29,7 @@ export const GameClock: React.FC<GameClockProps> = ({ clock, onTimeout }) => {
   }, [clock, onTimeout]);
 
   return (
-    <div className="absolute top-[4.25rem] left-4 z-30 flex items-center gap-2 font-mono tabular-nums text-sm pointer-events-none">
+    <div className="flex items-center gap-2 font-mono tabular-nums text-sm pointer-events-none">
       {(['player', 'ai'] as Team[]).map((team) => {
         const active = clock.running === team;
         const left = timeLeft(clock, team, active ? Math.max(now, clock.since) : clock.since);
