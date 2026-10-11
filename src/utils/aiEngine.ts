@@ -354,11 +354,14 @@ export function chooseAIAction(
       timedOut = true;
     }
 
-    // A partially searched iteration is still usable: the previous best move is
-    // searched first, and any move that beat it has an exact score.
+    // A partially searched iteration is still usable. Moves it did not reach keep
+    // their score from the previous depth: if the previous best collapses at the
+    // new depth, an alternative that has not been re-searched yet must still win over it.
     if (iteration.length > 0) {
-      scored = iteration;
-      bestScore = Math.max(...iteration.map((m) => m.score));
+      scored = timedOut
+        ? root.filter((e) => e.score > -Infinity).map((e) => ({ action: e.action, score: e.score }))
+        : iteration;
+      bestScore = Math.max(...scored.map((m) => m.score));
       reachedDepth = depth;
     }
     if (timedOut) break;
