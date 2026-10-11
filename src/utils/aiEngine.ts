@@ -19,8 +19,9 @@ import { BISHOP_LINES, ROOK_LINES, calculateGambitMoves, isKingInCheck, traceLin
  *
  * - Leaves are resolved with a capture-only quiescence search so the horizon
  *   never falls in the middle of an exchange.
- * - Below the root only the most promising quiet moves are searched (all
- *   captures always are), which buys extra depth.
+ * - Below the root only our own most promising quiet moves are searched (all
+ *   captures and all opponent replies always are), which buys extra depth
+ *   without letting a pruned defence fake a forced win.
  * - The evaluation is generic per mode. Dominion: material, tiles under influence
  *   and the safety margin of each King. Gambit: material, activity of the long-range
  *   pieces, Scout advancement and King shelter.
@@ -297,15 +298,17 @@ export function chooseAIAction(
     if (depth <= 0) return quiesce(s, alpha, beta, ply, 0);
     tick();
 
+    const maximizing = s.currentTurn === me;
     let ordered = orderActions(s, getActions(s, tiles));
     if (ordered.length === 0) return evaluate(s, ply);
-    if (ordered.length > INNER_BEAM_WIDTH) {
+    // Only our own quiet moves are pruned. Pruning the opponent's would hide its
+    // defensive replies and make refutable lines look like forced wins.
+    if (maximizing && ordered.length > INNER_BEAM_WIDTH) {
       const captures = ordered.filter((o) => o.action.kind === 'move' && o.action.move.isAttack);
       const quiet = ordered.filter((o) => !(o.action.kind === 'move' && o.action.move.isAttack));
       ordered = [...captures, ...quiet.slice(0, Math.max(0, INNER_BEAM_WIDTH - captures.length))];
     }
 
-    const maximizing = s.currentTurn === me;
     let best = maximizing ? -Infinity : Infinity;
     for (const { action } of ordered) {
       const v = search(applyAction(s, tiles, action), depth - 1, alpha, beta, ply + 1);
