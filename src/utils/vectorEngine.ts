@@ -216,7 +216,9 @@ export function applyMove(s0: VectorState, move: number): VectorState {
 
 // ---- Evaluation and search ----------------------------------------------------------
 export const WIN = 1_000_000;
-const VALUE = [0, 100, 180, 260, 0];
+// Fitted to game outcomes in self-play: a Captain is worth about four Scouts and
+// at least as much as a General (its range matters more than the General's aura)
+const VALUE = [0, 100, 400, 250, 0];
 // Captures resolved past the horizon before a position is scored
 const MAX_QUIESCENCE_DEPTH = 6;
 
