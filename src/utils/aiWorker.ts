@@ -5,7 +5,7 @@ import { chooseConcentrationAction } from './concentrationAI';
 import { chooseDominionAction } from './vectorEngine';
 
 // Which Dominion opponent to play against: the alpha-beta search engine, or the
-// experimental greedy bot that maximizes its own squared influence and mobility.
+// experimental concentration bot (concentrationAI.ts).
 const DOMINION_AI: 'search' | 'concentration' = 'concentration';
 
 export interface AIRequest {
