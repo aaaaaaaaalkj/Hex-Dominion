@@ -39,7 +39,7 @@ export const closed: number[][] = coords.map((c, i) => [
 ]);
 const moveNbrs = coords.map((_, i) => (playable[i] ? closed[i].slice(1).filter((j) => playable[j]) : []));
 const adjacent = coords.map((_, i) => new Set(closed[i].slice(1)));
-const playableTiles = coords.map((_, i) => i).filter((i) => playable[i]);
+export const playableTiles = coords.map((_, i) => i).filter((i) => playable[i]);
 
 // ---- Zobrist hashing (two 26-bit halves combined into one safe integer) -------
 let seed = 0x2545f491;
@@ -439,11 +439,16 @@ export function chooseDominionAction(
     options.quietTimeLimitMs !== undefined && isQuiet(s) ? options.quietTimeLimitMs : options.timeLimitMs ?? 1200;
   const choice = chooseMove(s, budget, options.maxDepth ?? 30, options.randomMargin ?? 0);
   if (!choice) return null;
+  const action = toGameAction(state, tiles, choice.move);
+  return { action, score: choice.score, depth: choice.depth, nodes: choice.nodes, timeMs: Date.now() - started };
+}
 
+/** The app action matching a vector-model move in `state`. */
+export function toGameAction(state: GameState, tiles: Map<string, HexTile>, move: number): GameAction {
   const actions = getActions(state, tiles);
-  const from = moveFrom(choice.move), to = moveTo(choice.move);
+  const from = moveFrom(move), to = moveTo(move);
   const action =
-    choice.move === PASS
+    move === PASS
       ? actions.find((a) => a.kind === 'pass')
       : actions.find((a) => {
           if (a.kind !== 'move') return false;
@@ -451,5 +456,5 @@ export function chooseDominionAction(
           return unit.coord.q === from.q && unit.coord.r === from.r && a.move.target.q === to.q && a.move.target.r === to.r;
         });
   if (!action) throw new Error('Vector engine chose a move the game does not allow');
-  return { action, score: choice.score, depth: choice.depth, nodes: choice.nodes, timeMs: Date.now() - started };
+  return action;
 }

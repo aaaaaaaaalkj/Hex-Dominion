@@ -1,7 +1,12 @@
 import { HexTile } from '../types/game';
 import { chooseAIAction, SearchOptions, SearchResult } from './aiEngine';
 import { GameState } from './gameState';
+import { chooseConcentrationAction } from './concentrationAI';
 import { chooseDominionAction } from './vectorEngine';
+
+// Which Dominion opponent to play against: the alpha-beta search engine, or the
+// experimental greedy bot that maximizes squared influence.
+const DOMINION_AI: 'search' | 'concentration' = 'concentration';
 
 export interface AIRequest {
   requestId: number;
@@ -22,10 +27,14 @@ const scope = self as unknown as {
 };
 
 // Runs the search off the main thread so the board stays responsive while the AI thinks.
-// Dominion uses the vector-model engine, Gambit the object-model search.
+// Dominion uses the opponent picked by DOMINION_AI, Gambit the object-model search.
 scope.onmessage = (e) => {
   const { requestId, state, tiles, options } = e.data;
   const result: SearchResult | null =
-    state.mode === 'dominion' ? chooseDominionAction(state, tiles, options) : chooseAIAction(state, tiles, options);
+    state.mode !== 'dominion'
+      ? chooseAIAction(state, tiles, options)
+      : DOMINION_AI === 'concentration'
+        ? chooseConcentrationAction(state, tiles)
+        : chooseDominionAction(state, tiles, options);
   scope.postMessage({ requestId, result });
 };
