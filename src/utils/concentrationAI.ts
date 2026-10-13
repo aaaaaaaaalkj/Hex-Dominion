@@ -3,26 +3,27 @@
  * concentration of its influence. No look-ahead and no material count; every
  * legal move is scored by the position it leaves behind:
  *
- *   C = sum over playable tiles t of  -I[t] * |I[t]|
+ *   C = sum over playable tiles t of  R[t]^2
  *
- * i.e. the signed square of the influence vector, from Red's (ai, -1) point of
- * view. Squaring rewards stacking influence on few tiles over spreading it thin,
- * and counts the opponent's concentration against us. Captures and wins come
- * out of it indirectly (a removed enemy unit removes its influence), except a
- * game-ending move, which always wins.
+ * where R is the influence of the mover's own units alone (the opponent's units
+ * are ignored, so moving next to them gains nothing). Squaring rewards stacking
+ * influence on few tiles over spreading it thin. A game-ending move always wins;
+ * otherwise captures count only through the tiles the capturing unit lands on.
  */
 import { HexTile } from '../types/game';
 import { GameAction, GameState } from './gameState';
-import { applyMove, fromGameState, legalMoves, playableTiles, toGameAction, VectorState } from './vectorEngine';
+import { applyMove, closed, fromGameState, legalMoves, N, playableTiles, toGameAction, VectorState } from './vectorEngine';
 
-/** Signed squared influence from the point of view of `side`. */
+/** Sum of squares of the influence of `side`'s own units. */
 export function concentration(s: VectorState, side: 1 | -1): number {
   if (s.winner) return s.winner === side ? Infinity : -Infinity;
-  let c = 0;
+  const own = new Int16Array(N);
   for (const t of playableTiles) {
-    const i = s.I[t] * side;
-    c += i * Math.abs(i);
+    const v = s.u[t] * side;
+    if (v > 0) for (const j of closed[t]) own[j] += v;
   }
+  let c = 0;
+  for (const t of playableTiles) c += own[t] * own[t];
   return c;
 }
 
