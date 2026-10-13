@@ -12,7 +12,10 @@
  *                  as if no unit had moved yet this round
  *   material       own unit values minus the opponent's
  *   threats        value of opponent units we attack minus value of our units
- *                  the opponent attacks (Kings count KING_THREAT_VALUE)
+ *                  the opponent attacks (Kings count KING_THREAT_VALUE). With
+ *                  `timing`, a threat the target can answer first (its side gets
+ *                  to move it before the attacker acts, see `moveSlots`) counts
+ *                  only (1 - timing) as much
  *
  * scripts/ai-match.mjs plays variants against each other.
  */
@@ -37,13 +40,14 @@ export interface Weights {
   mobility: number;
   material: number;
   threats: number;
+  timing: number; // 0..1: discount for threats the target can answer first
   plies: number; // search depth in single-unit moves
 }
 
 // Tuned with scripts/ai-match.mjs: material and threats with a 2-ply look-ahead beat
 // the alpha-beta engine at 200 ms/move 7-1-0; mobility lost games in every pairing,
 // and dropping concentration fell to 38%.
-export const DEFAULT_WEIGHTS: Weights = { concentration: 1, mobility: 0, material: 2, threats: 1, plies: 2 };
+export const DEFAULT_WEIGHTS: Weights = { concentration: 1, mobility: 0, material: 2, threats: 1, timing: 0, plies: 2 };
 
 // Same scale as the search engine's material values (Scout, General, Captain)
 const UNIT_VALUE = [0, 100, 400, 250, 0];
@@ -63,26 +67,87 @@ export function concentration(s: VectorState, side: Side): number {
 }
 
 /**
+ * The move order from now to the end of the next round, assuming no unit is
+ * captured or blocked meanwhile. Returns, for each tile, the earliest slot
+ * (0 = the move being made now) at which its unit may act: units of one rank
+ * share the slots of that rank, since their owner picks which goes first.
+ * Mirrors the rank order and turn hand-over of vectorEngine.ts: sides
+ * alternate, a side with nothing left is skipped, and the side that made the
+ * last move of a round moves second in the next.
+ */
+export function moveSlots(s: VectorState): Float64Array {
+  const fresh = { ...s, moved: new Uint8Array(N) };
+  // Ranks still to move, highest first: this round (unmoved, can move) and the next
+  const queues = (st: VectorState, side: Side) => {
+    const ranks: number[] = [];
+    for (const t of playableTiles) {
+      const v = s.u[t] * side;
+      if (v > 0 && !st.moved[t] && unitMoves(st, t, [], true).length) ranks.push(v);
+    }
+    return ranks.sort((a, b) => b - a);
+  };
+  const first = new Map<number, number>(); // side * 10 + rank -> slot this round
+  const next = new Map<number, number>(); // the same for the next round
+  let slot = 0;
+  const run = (q: Record<number, number[]>, start: Side, into: Map<number, number>): Side => {
+    let side = start, last = start;
+    while (q[side].length || q[-side].length) {
+      if (!q[side].length) side = -side as Side;
+      const key = side * 10 + q[side].shift()!;
+      if (!into.has(key)) into.set(key, slot);
+      slot++;
+      last = side;
+      side = -side as Side;
+    }
+    return last;
+  };
+  const last = run({ 1: queues(s, 1), [-1]: queues(s, -1) }, s.side, first);
+  run({ 1: queues(fresh, 1), [-1]: queues(fresh, -1) }, -last as Side, next);
+
+  const slots = new Float64Array(N).fill(Infinity);
+  for (const t of playableTiles) {
+    const v = s.u[t];
+    if (!v) continue;
+    const key = Math.sign(v) * 10 + Math.abs(v);
+    // A unit that has moved, or is blocked, acts next round at the earliest
+    const now = !s.moved[t] && unitMoves(s, t, [], true).length > 0;
+    slots[t] = (now ? first.get(key) : undefined) ?? next.get(key) ?? Infinity;
+  }
+  return slots;
+}
+
+/**
  * Freedom of movement and attacks of `side`, with every unit unmoved:
  * the number of (unit, destination) moves, and the value of the distinct
- * enemy units it can capture.
+ * enemy units it can capture. With `slots` (moveSlots), a target whose unit
+ * acts before every one of its attackers counts only `answerable` as much.
  */
-export function activity(s: VectorState, side: Side): { moves: number; attacked: number } {
+export function activity(
+  s: VectorState,
+  side: Side,
+  slots?: Float64Array,
+  answerable = 1
+): { moves: number; attacked: number } {
   const fresh = { ...s, moved: new Uint8Array(N) };
   const out: number[] = [];
-  const hit = new Set<number>();
+  const hit = new Map<number, number>(); // target tile -> earliest attacker slot
   let moves = 0;
   for (const t of playableTiles) {
     if (s.u[t] * side <= 0) continue;
     out.length = 0;
     unitMoves(fresh, t, out);
     moves += out.length;
-    for (const m of out) if (s.u[m & 127]) hit.add(m & 127);
+    const at = slots ? slots[t] : 0;
+    for (const m of out) {
+      const target = m & 127;
+      if (s.u[target]) hit.set(target, Math.min(hit.get(target) ?? Infinity, at));
+    }
   }
   let attacked = 0;
-  for (const t of hit) {
+  for (const [t, at] of hit) {
     const r = Math.abs(s.u[t]);
-    attacked += r === 4 ? KING_THREAT_VALUE : UNIT_VALUE[r];
+    const value = r === 4 ? KING_THREAT_VALUE : UNIT_VALUE[r];
+    attacked += slots && slots[t] < at ? answerable * value : value;
   }
   return { moves, attacked };
 }
@@ -102,7 +167,8 @@ export function score(s: VectorState, side: Side, w: Weights = DEFAULT_WEIGHTS):
   let total = 0;
   if (w.concentration) total += w.concentration * concentration(s, side);
   if (w.mobility || w.threats) {
-    const own = activity(s, side), opp = activity(s, -side as Side);
+    const slots = w.timing ? moveSlots(s) : undefined;
+    const own = activity(s, side, slots, 1 - w.timing), opp = activity(s, -side as Side, slots, 1 - w.timing);
     total += w.mobility * (own.moves - opp.moves) + w.threats * (own.attacked - opp.attacked);
   }
   if (w.material) total += w.material * material(s, side);
