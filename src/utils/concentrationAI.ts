@@ -109,6 +109,12 @@ export function score(s: VectorState, side: Side, w: Weights = DEFAULT_WEIGHTS):
   return total;
 }
 
+/**
+ * The concentration score from Red's point of view, as the evaluation of the
+ * alpha-beta engine (vectorEngine.chooseMove). `plies` is ignored.
+ */
+export const asEvaluator = (w: Weights = DEFAULT_WEIGHTS) => (s: VectorState) => score(s, -1, w);
+
 function minimax(s: VectorState, depth: number, alpha: number, beta: number, root: Side, w: Weights): number {
   if (depth === 0 || s.winner) {
     const v = score(s, root, w);

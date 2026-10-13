@@ -9,6 +9,8 @@
  *   search:<ms>                    the alpha-beta engine (vectorEngine.ts) with <ms> per move
  *   conc[:key=value,...]           the concentration bot (concentrationAI.ts); keys override
  *                                  DEFAULT_WEIGHTS, e.g. conc:mobility=8,plies=2
+ *   hybrid:<ms>[:key=value,...]    the alpha-beta engine scoring positions with the
+ *                                  concentration bot's evaluation
  *
  * Each pair starts from the same random opening (openingPlies random moves,
  * default 4) and is played twice with colours swapped. A game is drawn after
@@ -31,18 +33,27 @@ const { generateGameMap } = await server.ssrLoadModule('/src/utils/mapGenerator.
 const V = await server.ssrLoadModule('/src/utils/vectorEngine.ts');
 const C = await server.ssrLoadModule('/src/utils/concentrationAI.ts');
 
+function weights(arg) {
+  const w = { ...C.DEFAULT_WEIGHTS };
+  for (const kv of arg.split(',').filter(Boolean)) {
+    const [k, v] = kv.split('=');
+    if (!(k in w)) throw new Error(`Unknown weight ${k}`);
+    w[k] = Number(v);
+  }
+  return w;
+}
+
 function strategy(spec) {
-  const [kind, arg = ''] = spec.split(':');
+  const [kind, arg = '', arg2 = ''] = spec.split(':');
   if (kind === 'random') return (s) => { const ms = V.legalMoves(s); return ms[Math.floor(Math.random() * ms.length)]; };
   if (kind === 'search') return (s) => V.chooseMove(s, Number(arg || 50)).move;
   if (kind === 'conc') {
-    const w = { ...C.DEFAULT_WEIGHTS };
-    for (const kv of arg.split(',').filter(Boolean)) {
-      const [k, v] = kv.split('=');
-      if (!(k in w)) throw new Error(`Unknown weight ${k}`);
-      w[k] = Number(v);
-    }
+    const w = weights(arg);
     return (s) => C.chooseMove(s, w).move;
+  }
+  if (kind === 'hybrid') {
+    const evaluator = C.asEvaluator(weights(arg2));
+    return (s) => V.chooseMove(s, Number(arg || 50), 30, 0, evaluator).move;
   }
   throw new Error(`Unknown strategy ${spec}`);
 }

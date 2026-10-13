@@ -241,7 +241,11 @@ interface SearchContext {
   nodes: number;
   deadline: number;
   tt: Map<number, { lo: number; hi: number }>[];
+  evaluate: Evaluator;
 }
+
+/** Static score of a non-terminal position from Red's point of view (|score| well below WIN). */
+export type Evaluator = (s: VectorState) => number;
 
 const isCapture = (s: VectorState, m: number) => m !== PASS && s.u[m & 127] !== 0;
 // Most valuable victim first, then least valuable attacker
@@ -259,7 +263,7 @@ function tick(ctx: SearchContext) {
  */
 function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext, qDepth: number): number {
   tick(ctx);
-  const standPat = evaluate(s);
+  const standPat = s.winner ? evaluate(s) : ctx.evaluate(s);
   if (s.winner || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
   const maximizing = s.side === -1;
   if (maximizing) {
@@ -316,7 +320,7 @@ function search(s: VectorState, depth: number, alpha: number, beta: number, ctx:
  * at the deepest finished depth. Used by the analyzer, which shows candidates.
  */
 export function analyze(s: VectorState, budgetMs: number, maxDepth = 30) {
-  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [] };
+  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate };
   let ranked = legalMoves(s).map((move) => ({ move, score: 0 }));
   let depth = 0;
   const sign = s.side === -1 ? 1 : -1;
@@ -351,9 +355,10 @@ export function chooseMove(
   s: VectorState,
   budgetMs: number,
   maxDepth = 30,
-  randomMargin = 0
+  randomMargin = 0,
+  evaluator: Evaluator = evaluate
 ): VectorChoice | null {
-  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [] };
+  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator };
   const moves = legalMoves(s);
   if (moves.length === 0) return null;
   if (moves.length === 1) return { move: moves[0], score: 0, depth: 0, nodes: 0 };
