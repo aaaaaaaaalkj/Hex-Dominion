@@ -8,7 +8,14 @@ Validation reports the 3-class accuracy per material against a baseline that
 only knows the material and who is to move (its most common outcome).
 """
 import argparse
+import os
+import sys
 import time
+
+# Cap every thread pool (NumPy's BLAS, PyTorch's OpenMP) before they start
+_threads = sys.argv[sys.argv.index('--threads') + 1] if '--threads' in sys.argv else '3'
+for _var in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'):
+    os.environ.setdefault(_var, _threads)
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -33,6 +40,7 @@ parser.add_argument('--threads', type=int, default=3)
 parser.add_argument('--out', default=str(Path(__file__).parent / 'checkpoints' / 'value.pt'))
 args = parser.parse_args()
 torch.set_num_threads(args.threads)
+torch.set_num_interop_threads(1)
 rng = np.random.default_rng(1)
 
 
