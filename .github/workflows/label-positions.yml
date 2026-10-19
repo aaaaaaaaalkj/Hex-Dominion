@@ -1,0 +1,105 @@
+# Generate search-labelled training positions (scripts/label-positions.mjs) on
+# GitHub's runners: each job runs one labeller per core for a fixed time, using
+# the tablebases from an earlier "Endgame tablebases" run, and all positions are
+# collected into a single "positions" artifact
+name: Label positions
+
+on:
+  workflow_dispatch:
+    inputs:
+      tablebase_run:
+        description: "Run id of an Endgame tablebases run with all four-unit tables"
+        required: true
+      jobs:
+        description: "Parallel jobs (4 labellers each)"
+        default: "20"
+      minutes:
+        description: "Minutes of labelling per job (at most 300)"
+        default: "150"
+      budget:
+        description: "Search time per position in ms"
+        default: "1000"
+      units:
+        description: "Unit counts to collect"
+        default: "5,6"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.matrix.outputs.jobs }}
+    steps:
+      - id: matrix
+        env:
+          JOBS: ${{ inputs.jobs }}
+        run: echo "jobs=$(jq -nc --argjson n "$JOBS" '[range(1; $n + 1)]')" >> "$GITHUB_OUTPUT"
+
+  label:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.matrix.outputs.jobs) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Download the tablebases
+        uses: actions/download-artifact@v4
+        with:
+          name: tablebase
+          path: tablebase/
+          run-id: ${{ inputs.tablebase_run }}
+          github-token: ${{ github.token }}
+      - name: Label positions
+        env:
+          MINUTES: ${{ inputs.minutes }}
+          BUDGET: ${{ inputs.budget }}
+          UNITS: ${{ inputs.units }}
+        run: |
+          mkdir -p positions
+          for w in $(seq 1 "$(nproc)"); do
+            node scripts/label-positions.mjs "positions/${{ matrix.job }}-$w.bin" "$MINUTES" "$BUDGET" "$UNITS" > "positions/${{ matrix.job }}-$w.log" &
+          done
+          wait
+          tail -qn 1 positions/*.log
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: positions-${{ matrix.job }}
+          path: positions/*.bin
+
+  # Everything in one positions.bin (records are fixed-size, so files concatenate)
+  collect:
+    needs: label
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          pattern: positions-*
+          path: parts/
+          merge-multiple: true
+      - name: Concatenate
+        run: |
+          mkdir -p out
+          cat parts/*.bin > out/positions.bin
+          echo "$(( $(stat -c %s out/positions.bin) / 128 )) positions"
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: positions
+          path: out/positions.bin

@@ -242,10 +242,14 @@ interface SearchContext {
   deadline: number;
   tt: Map<number, { lo: number; hi: number }>[];
   evaluate: Evaluator;
+  probe?: Prober;
 }
 
 /** Static score of a non-terminal position from Red's point of view (|score| well below WIN). */
 export type Evaluator = (s: VectorState) => number;
+
+/** Exact score of a position from an endgame tablebase (Red's point of view), or null when not covered. */
+export type Prober = (s: VectorState) => number | null;
 
 const isCapture = (s: VectorState, m: number) => m !== PASS && s.u[m & 127] !== 0;
 // Most valuable victim first, then least valuable attacker
@@ -263,6 +267,8 @@ function tick(ctx: SearchContext) {
  */
 function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext, qDepth: number): number {
   tick(ctx);
+  const exact = s.winner ? null : ctx.probe?.(s);
+  if (exact != null) return exact;
   const standPat = s.winner ? evaluate(s) : ctx.evaluate(s);
   if (s.winner || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
   const maximizing = s.side === -1;
@@ -290,6 +296,8 @@ function search(s: VectorState, depth: number, alpha: number, beta: number, ctx:
     const v = evaluate(s);
     return v === WIN ? v + depth : v - depth; // prefer quicker wins, slower losses
   }
+  const exact = ctx.probe?.(s);
+  if (exact != null) return exact;
   if (depth === 0) return quiesce(s, alpha, beta, ctx, 0);
   tick(ctx);
   const key = hashKey(s);
@@ -317,10 +325,11 @@ function search(s: VectorState, depth: number, alpha: number, beta: number, ctx:
 /**
  * Iterative deepening for the side to move (scores from Red's point of view).
  * Returns every root move with an exact score, ranked best-first for that side
- * at the deepest finished depth. Used by the analyzer, which shows candidates.
+ * at the deepest finished depth. Used by the analyzer, which shows candidates,
+ * and by the position labeller, whose `probe` scores tablebase positions exactly.
  */
-export function analyze(s: VectorState, budgetMs: number, maxDepth = 30) {
-  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate };
+export function analyze(s: VectorState, budgetMs: number, maxDepth = 30, probe?: Prober) {
+  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate, probe };
   let ranked = legalMoves(s).map((move) => ({ move, score: 0 }));
   let depth = 0;
   const sign = s.side === -1 ? 1 : -1;
