@@ -36,6 +36,98 @@ function floats(b64: string): Float32Array {
 }
 const layer = (l: RawLayer): Layer => ({ w: floats(l.w), b: floats(l.b) });
 
+/**
+ * A WebAssembly (SIMD) module exporting conv(inp, cin, out, w, b, nbr): the hex
+ * convolution of createValueNet for C output channels, P tiles and T taps, with
+ * byte offsets into the imported memory env.mem. Assembled here, as it is small.
+ */
+function convModule(C: number, P: number, T: number): Uint8Array<ArrayBuffer> {
+  const V = C / 4;
+  const uleb = (n: number) => { const o: number[] = []; do { let b = n & 0x7f; n >>>= 7; if (n) b |= 0x80; o.push(b); } while (n); return o; };
+  const sleb = (n: number) => { const o: number[] = []; for (;;) { const b = n & 0x7f; n >>= 7; if ((n === 0 && !(b & 0x40)) || (n === -1 && (b & 0x40))) { o.push(b); return o; } o.push(b | 0x80); } };
+  const str = (s: string) => [s.length, ...[...s].map((c) => c.charCodeAt(0))];
+  const vec = (items: (number | number[])[]) => [...uleb(items.length), ...items.flat()];
+  const section = (id: number, body: number[]) => [id, ...uleb(body.length), ...body];
+  const I32 = 0x7f, F32 = 0x7d, V128 = 0x7b;
+  const [inp, cin, out, w, b, nbr, p, k, n, ci, inBase, wBase, wo, x, xs] = Array.from({ length: 15 }, (_, i) => i);
+  const acc = (j: number) => 15 + j;
+  const get = (l: number) => [0x20, ...uleb(l)], set = (l: number) => [0x21, ...uleb(l)];
+  const i32c = (v: number) => [0x41, ...sleb(v)];
+  const simd = (op: number, ...rest: number[]) => [0xfd, ...uleb(op), ...rest];
+  const vload = (off: number) => simd(0x00, 4, ...uleb(off)), vstore = (off: number) => simd(0x0b, 4, ...uleb(off));
+  const ADD = 0x6a, MUL = 0x6c, SHL = 0x74, GE_S = 0x4e, BLOCK = 0x02, LOOP = 0x03, IF = 0x04, END = 0x0b, BR = 0x0c, BR_IF = 0x0d, VOID = 0x40;
+  // for (l = 0; l < limit; l++) body   (limit: instructions pushing an i32)
+  const loop = (l: number, limit: number[], body: number[]) => [
+    ...i32c(0), ...set(l), BLOCK, VOID, LOOP, VOID,
+    ...get(l), ...limit, GE_S, BR_IF, 1,
+    ...body,
+    ...get(l), ...i32c(1), ADD, ...set(l), BR, 0, END, END,
+  ];
+  const inner = [ // x = inp[inBase + ci]; if (x != 0) acc_j += x * w[wo + j]
+    ...get(inBase), ...get(ci), ...i32c(2), SHL, ADD, 0x2a, 2, 0, ...set(x),
+    ...get(x), 0x43, 0, 0, 0, 0, 0x5c, IF, VOID,
+    ...get(x), ...simd(0x13), ...set(xs),
+    ...get(wBase), ...get(ci), ...i32c(C * 4), MUL, ADD, ...set(wo),
+    ...Array.from({ length: V }, (_, j) => [...get(acc(j)), ...get(xs), ...get(wo), ...vload(16 * j), ...simd(0xe6), ...simd(0xe4), ...set(acc(j))]).flat(),
+    END,
+  ];
+  const tap = [ // n = nbr[k * P + p]; if (n >= 0) loop over ci
+    ...get(nbr), ...get(k), ...i32c(P), MUL, ...get(p), ADD, ...i32c(2), SHL, ADD, 0x28, 2, 0, ...set(n),
+    ...get(n), ...i32c(0), GE_S, IF, VOID,
+    ...get(inp), ...get(n), ...get(cin), MUL, ...i32c(2), SHL, ADD, ...set(inBase),
+    ...get(w), ...get(k), ...get(cin), MUL, ...i32c(C * 4), MUL, ADD, ...set(wBase),
+    ...loop(ci, get(cin), inner),
+    END,
+  ];
+  const tile = [
+    ...Array.from({ length: V }, (_, j) => [...get(b), ...vload(16 * j), ...set(acc(j))]).flat(),
+    ...loop(k, i32c(T), tap),
+    ...get(out), ...get(p), ...i32c(C * 4), MUL, ADD, ...set(wo),
+    ...Array.from({ length: V }, (_, j) => [...get(wo), ...get(acc(j)), ...vstore(16 * j)]).flat(),
+  ];
+  const code = [...loop(p, i32c(P), tile), END];
+  const locals = vec([[...uleb(7), I32], [1, F32], [...uleb(1 + V), V128]]);
+  const body = [...locals, ...code];
+  return new Uint8Array([
+    0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+    ...section(1, vec([[0x60, ...vec(Array(6).fill([I32]) as number[][]), 0]])),
+    ...section(2, vec([[...str('env'), ...str('mem'), 0x02, 0x00, 1]])),
+    ...section(3, vec([[0]])),
+    ...section(7, vec([[...str('conv'), 0x00, 0]])),
+    ...section(10, vec([[...uleb(body.length), ...body]])),
+  ]);
+}
+
+type Conv = (inp: Float32Array, cin: number, out: Float32Array, l: Layer) => void;
+
+/**
+ * The convolution in WebAssembly, or null where SIMD is unavailable. Weights are
+ * copied into its memory once; activations must be views of `mem` (alloc).
+ */
+function wasmConv(C: number, P: number, T: number, nbr: Int32Array, layers: Layer[], floats: number) {
+  try {
+    const bytes = 4 * (floats + nbr.length + layers.reduce((n, l) => n + l.w.length + l.b.length, 0)) + 16 * (2 * layers.length + 8);
+    const mem = new WebAssembly.Memory({ initial: Math.ceil(bytes / 65536) });
+    const conv = new WebAssembly.Instance(new WebAssembly.Module(convModule(C, P, T)), { env: { mem } }).exports.conv as (
+      ...args: number[]
+    ) => void;
+    let top = 0;
+    const alloc = (n: number) => { const view = new Float32Array(mem.buffer, top, n); top += Math.ceil(n / 4) * 16; return view; };
+    const placed = new Map(layers.map((l) => [l, { w: alloc(l.w.length), b: alloc(l.b.length) }]));
+    for (const [l, at] of placed) { at.w.set(l.w); at.b.set(l.b); }
+    const nb = new Int32Array(mem.buffer, top, nbr.length);
+    nb.set(nbr);
+    top += Math.ceil(nbr.length / 4) * 16;
+    const run: Conv = (inp, cin, out, l) => {
+      const at = placed.get(l)!;
+      conv(inp.byteOffset, cin, out.byteOffset, at.w.byteOffset, at.b.byteOffset, nb.byteOffset);
+    };
+    return { run, alloc };
+  } catch {
+    return null;
+  }
+}
+
 export function createValueNet(file: ValueNetFile): ValueNet {
   const C = file.channels, F = file.planes, T = file.taps.length;
   const stem = layer(file.stem);
@@ -51,12 +143,10 @@ export function createValueNet(file: ValueNetFile): ValueNet {
     });
   });
 
-  const input = new Float32Array(P * F);
-  const a = new Float32Array(P * C), b = new Float32Array(P * C), c = new Float32Array(P * C);
   const hidden = new Float32Array(H), pooled = new Float32Array(2 * C);
 
   // out = conv(inp) + bias, activations tile-major ([tile][channel])
-  function conv(inp: Float32Array, cin: number, out: Float32Array, l: Layer) {
+  function jsConv(inp: Float32Array, cin: number, out: Float32Array, l: Layer) {
     for (let p = 0; p < P; p++) out.set(l.b, p * C);
     for (let k = 0; k < T; k++) {
       for (let p = 0; p < P; p++) {
@@ -72,6 +162,12 @@ export function createValueNet(file: ValueNetFile): ValueNet {
       }
     }
   }
+  const wasm = C % 4 === 0 ? wasmConv(C, P, T, nbr, [stem, ...blocks.flatMap((b) => [b.c1, b.c2])], P * F + 3 * P * C) : null;
+  const conv: Conv = wasm?.run ?? jsConv;
+  const alloc = wasm?.alloc ?? ((n: number) => new Float32Array(n));
+  const input = alloc(P * F);
+  const a = alloc(P * C), b = alloc(P * C), c = alloc(P * C);
+
   const relu = (x: Float32Array) => { for (let i = 0; i < x.length; i++) if (x[i] < 0) x[i] = 0; };
 
   // Input planes (ml/hexdata.py encode) from the side to move's view
