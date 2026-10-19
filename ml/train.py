@@ -137,6 +137,13 @@ def report():
                      f'  (material only: mse {np.mean((base - et) ** 2):.4f}, sign {agree(base, everything):.4f})')
         lines.append(f'    balanced material n {balanced.sum()}: mse {np.mean((ep[balanced] - et[balanced]) ** 2):.4f}'
                      f'  sign agreement on decided {agree(ep, balanced):.4f}')
+        units = (extra_val[0] != 0).sum(1)
+        for lo, hi in ((5, 6), (7, 10), (11, 15), (16, 20)):
+            sel = (units >= lo) & (units <= hi)
+            if sel.any():
+                lines.append(f'    {lo}-{hi} units n {sel.sum():6}: mse {np.mean((ep[sel] - et[sel]) ** 2):.4f}'
+                             f' (material {np.mean((base[sel] - et[sel]) ** 2):.4f})'
+                             f'  sign {agree(ep, sel):.4f} (material {agree(base, sel):.4f})')
         metrics['extra_mse'] = float(np.mean((ep - et) ** 2))
     print('\n'.join(lines), flush=True)
     return metrics
