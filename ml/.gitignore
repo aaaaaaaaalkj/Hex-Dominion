@@ -2,3 +2,4 @@ checkpoints/
 .venv/
 __pycache__/
 *.bin
+*.rec
