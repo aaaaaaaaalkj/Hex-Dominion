@@ -449,18 +449,19 @@ export function isQuiet(s: VectorState): boolean {
 
 /**
  * The Dominion AI: searches on the vector model and returns the matching app
- * action. Takes the same options as chooseAIAction (aiEngine.ts).
+ * action. Takes the same options as chooseAIAction (aiEngine.ts), plus the
+ * evaluator to score positions with (the hand-written one by default).
  */
 export function chooseDominionAction(
   state: GameState,
   tiles: Map<string, HexTile>,
-  options: { timeLimitMs?: number; quietTimeLimitMs?: number; maxDepth?: number; randomMargin?: number } = {}
+  options: { timeLimitMs?: number; quietTimeLimitMs?: number; maxDepth?: number; randomMargin?: number; evaluator?: Evaluator } = {}
 ): { action: GameAction; score: number; depth: number; nodes: number; timeMs: number } | null {
   const started = Date.now();
   const s = fromGameState(state);
   const budget =
     options.quietTimeLimitMs !== undefined && isQuiet(s) ? options.quietTimeLimitMs : options.timeLimitMs ?? 1200;
-  const choice = chooseMove(s, budget, { maxDepth: options.maxDepth, randomMargin: options.randomMargin });
+  const choice = chooseMove(s, budget, { maxDepth: options.maxDepth, randomMargin: options.randomMargin, evaluator: options.evaluator });
   if (!choice) return null;
   const action = toGameAction(state, tiles, choice.move);
   return { action, score: choice.score, depth: choice.depth, nodes: choice.nodes, timeMs: Date.now() - started };

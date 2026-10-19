@@ -255,7 +255,7 @@ export function netEvaluator(net: ValueNet, maxUnits = Infinity): Evaluator {
     if (hit !== undefined) return hit;
     const v = Math.max(-CLAMP, Math.min(CLAMP, net(s)));
     const score = SCALE * Math.atanh(v) * (s.side === -1 ? 1 : -1);
-    if (cache.size > 2_000_000) cache.clear();
+    if (cache.size > 500_000) cache.clear(); // about 40 MB
     cache.set(key, score);
     return score;
   };
