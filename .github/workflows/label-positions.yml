@@ -20,8 +20,8 @@ on:
         description: "Search time per position in ms"
         default: "1000"
       units:
-        description: "Unit counts to collect"
-        default: "5,6"
+        description: "Unit counts to collect, e.g. 5,6 or 5-20"
+        default: "5-20"
 
 permissions:
   contents: read
@@ -71,7 +71,7 @@ jobs:
         run: |
           mkdir -p positions
           for w in $(seq 1 "$(nproc)"); do
-            node scripts/label-positions.mjs "positions/${{ matrix.job }}-$w.bin" "$MINUTES" "$BUDGET" "$UNITS" > "positions/${{ matrix.job }}-$w.log" &
+            node scripts/label-positions.mjs "positions/${{ matrix.job }}-$w.rec" "$MINUTES" "$BUDGET" "$UNITS" > "positions/${{ matrix.job }}-$w.log" &
           done
           wait
           tail -qn 1 positions/*.log
@@ -79,9 +79,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: positions-${{ matrix.job }}
-          path: positions/*.bin
+          path: positions/*.rec
 
-  # Everything in one positions.bin (records are fixed-size, so files concatenate)
+  # Everything in one positions.rec (records are fixed-size, so files concatenate)
   collect:
     needs: label
     if: ${{ !cancelled() }}
@@ -96,10 +96,10 @@ jobs:
       - name: Concatenate
         run: |
           mkdir -p out
-          cat parts/*.bin > out/positions.bin
-          echo "$(( $(stat -c %s out/positions.bin) / 128 )) positions"
+          cat parts/*.rec > out/positions.rec
+          echo "$(( $(stat -c %s out/positions.rec) / 132 )) positions"
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: positions
-          path: out/positions.bin
+          path: out/positions.rec

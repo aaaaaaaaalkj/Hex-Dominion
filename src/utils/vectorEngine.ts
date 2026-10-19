@@ -363,9 +363,10 @@ export function chooseMove(
   budgetMs: number,
   maxDepth = 30,
   randomMargin = 0,
-  evaluator: Evaluator = evaluate
+  evaluator: Evaluator = evaluate,
+  probe?: Prober
 ): VectorChoice | null {
-  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator };
+  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator, probe };
   const moves = legalMoves(s);
   if (moves.length === 0) return null;
   if (moves.length === 1) return { move: moves[0], score: 0, depth: 0, nodes: 0 };

@@ -1,9 +1,11 @@
 """Trains the hex value network on tablebase positions (exact labels) and,
 optionally, search-labelled positions with more units.
 
-  ml/.venv/bin/python ml/train.py [--extra positions.bin ...] [--epochs 3]
+  ml/.venv/bin/python ml/train.py [--extra positions.bin games.rec ...] [--epochs 3]
 
 Tablebase labels are win/loss/never-resolved (+1/-1/0) for the side to move.
+Search-labelled positions that come with their game's result (*.rec) are
+trained on a blend of the search label and the result (--result-weight).
 Validation reports the 3-class accuracy per material against a baseline that
 only knows the material and who is to move (its most common outcome).
 """
@@ -31,6 +33,7 @@ parser.add_argument('--per-lopsided', type=int, default=50_000, help='two extra 
 parser.add_argument('--val-per-table', type=int, default=20_000)
 parser.add_argument('--extra', nargs='*', default=[], help='search-labelled position files')
 parser.add_argument('--extra-repeat', type=int, default=1, help='oversample the extra positions')
+parser.add_argument('--result-weight', type=float, default=0.3, help='share of the game result in the target of *.rec positions')
 parser.add_argument('--epochs', type=int, default=3)
 parser.add_argument('--batch', type=int, default=512)
 parser.add_argument('--lr', type=float, default=2e-3)
@@ -64,7 +67,9 @@ val = cat(val_parts)
 
 extra_val = None
 if args.extra:
-    eu, em, es, ev = cat([load_records(p) for p in args.extra])
+    eu, em, es, ev, er = cat([load_records(p) for p in args.extra])
+    has_result = ~np.isnan(er)
+    ev = np.where(has_result, (1 - args.result_weight) * ev + args.result_weight * np.nan_to_num(er), ev).astype(np.float32)
     perm = rng.permutation(len(eu))
     k = max(1, len(eu) // 20)
     vi, ti = perm[:k], perm[k:]

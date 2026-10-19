@@ -150,9 +150,15 @@ def sample_table(name, count, rng):
 
 
 # ---- Search-labelled positions (scripts/label-positions.mjs) -------------------
+# *.bin files hold RECORDs (search label only), *.rec files GAME_RECORDs, which
+# add the result of the game the position came from
 RECORD = np.dtype([('u', 'i1', P), ('moved', 'u1', P), ('side', 'i1'), ('units', 'u1'), ('value', '<f4')])
+GAME_RECORD = np.dtype(RECORD.descr + [('result', 'i1'), ('pad', 'u1', 3)])
 
 
 def load_records(path):
-    r = np.fromfile(path, dtype=RECORD)
-    return r['u'], r['moved'], r['side'], r['value']
+    """(u, moved, side, value, result) with result NaN where the file has none."""
+    games = str(path).endswith('.rec')
+    r = np.fromfile(path, dtype=GAME_RECORD if games else RECORD)
+    result = r['result'].astype(np.float32) if games else np.full(len(r), np.nan, np.float32)
+    return r['u'], r['moved'], r['side'], r['value'], result
