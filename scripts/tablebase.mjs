@@ -2,19 +2,29 @@
 /**
  * Solves small Dominion endgames exactly by retrograde analysis on the vector engine.
  *
- *   node scripts/tablebase.mjs [maxUnits]
+ *   node scripts/tablebase.mjs [material ...]
  *
- * Every material with both Kings and at most maxUnits units (default 3) is solved,
- * smaller materials first so that captures resolve through finished tables.
+ * A material names Blue's units, then Red's, by rank letter (K King, G General,
+ * C Captain, S Scout), e.g. KS-KG; both sides keep their King, since its capture
+ * ends the game. The default is every endgame with up to three units plus the
+ * four-unit duels with one extra unit per side; materials with two extra units
+ * against a bare King can be named explicitly. Colour mirrors (KG-KS for KS-KG)
+ * are not solved but read from the mirrored table. Tables that a capture leads
+ * into are solved first, or loaded from tablebase/ when already there, so a long
+ * run can be split into one material per invocation.
+ *
  * A position is the units' tiles, their moved flags and the side to move, reduced
- * by the 12 symmetries of the hexagon. Values are plies to the end of the game
- * from Blue's point of view: +d Blue wins, -d Red wins, 0 never resolved (Dominion
- * has no draw rule, so these games go on forever with best play).
+ * by the 12 symmetries of the hexagon to its smallest raw index:
+ *   raw = ((tile_0 * 61 + tile_1) * 61 + ...) * 2^n + movedBits) * 2 + sideBit
+ * with units in material order (signed ranks descending, Blue positive) and
+ * sideBit 1 when Red is to move. Values are plies to the end of the game from
+ * Blue's point of view: +d Blue wins, -d Red wins, 0 never resolved (Dominion has
+ * no draw rule, so such games go on forever with best play).
  *
- * Each table is written to tablebase/<material>.tb: Int32 raw indices of the
- * canonical positions followed by their Int16 values, with the layout in
- * tablebase/<material>.json. A sample of positions, including non-canonical ones,
- * is re-checked against its successors after solving.
+ * tablebase/<material>.tb holds the canonical raws as a bitset (Uint32 words,
+ * bit raw & 31 of word raw >> 5) followed by their Int16 values in increasing raw
+ * order; tablebase/<material>.json describes it. After solving, a sample of
+ * positions, including non-canonical ones, is re-checked against its successors.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,7 +32,10 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 
 const CHECK_SAMPLES = 20000;
+const FORMAT = 2;
+const DEFAULT_MATERIALS = ['K-K', 'KS-K', 'KC-K', 'KG-K', 'KS-KS', 'KC-KC', 'KG-KG', 'KS-KC', 'KS-KG', 'KC-KG'];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dir = path.join(root, 'tablebase');
 const server = await createServer({
   root,
   configFile: false,
@@ -32,12 +45,6 @@ const server = await createServer({
 });
 const V = await server.ssrLoadModule('/src/utils/vectorEngine.ts');
 await server.close();
-
-const MAX_UNITS = Number(process.argv[2] ?? 3);
-if (!(MAX_UNITS >= 2 && MAX_UNITS <= 3)) {
-  console.error('maxUnits must be 2 or 3 (the dense index does not fit in memory beyond that)');
-  process.exit(1);
-}
 
 const PT = V.playableTiles;
 const P = PT.length; // 61
@@ -56,25 +63,34 @@ for (let refl = 0; refl < 2; refl++) {
     }));
   }
 }
+// A canonical position starts with the smallest tile of its first unit's orbit
+const ORBIT_MIN = PT.map((_, p) => p).filter((p) => SYMS.every((g) => g[p] >= p));
+
+const log = (msg) => process.stderr.write(`  ${msg}\n`);
+const seconds = (t) => `${((Date.now() - t) / 1000).toFixed(1)}s`;
 
 // ---- Materials --------------------------------------------------------------
-// A material is its signed ranks sorted descending, e.g. [4, 1, -4] (King and Scout vs King).
+// A material is its signed ranks sorted descending, e.g. [4, 1, -4] for KS-K.
 const LETTERS = { 1: 'S', 2: 'C', 3: 'G', 4: 'K' };
-const half = (ranks, g) => ranks.filter((v) => v * g > 0).map((v) => v * g).sort((a, b) => b - a).map((v) => LETTERS[v]).join('');
+const RANK_OF = { S: 1, C: 2, G: 3, K: 4 };
+const byRank = (a, b) => b - a;
+const half = (ranks, g) => ranks.filter((v) => v * g > 0).map((v) => v * g).sort(byRank).map((v) => LETTERS[v]).join('');
 const nameOf = (ranks) => `${half(ranks, 1)}-${half(ranks, -1)}`;
+const mirrorName = (name) => name.split('-').reverse().join('-');
 
-function materials(maxUnits) {
-  const out = [[4, -4]];
-  const extras = [1, 2, 3, -1, -2, -3];
-  if (maxUnits >= 3) for (const x of extras) out.push([4, x, -4].sort((a, b) => b - a));
-  return out;
+function parseMaterial(name) {
+  const halves = name.toUpperCase().split('-');
+  if (halves.length !== 2 || !halves.every((h) => /^K[GCS]*$/.test(h))) {
+    throw new Error(`Bad material ${name}: expected e.g. KS-KG (King first on both sides)`);
+  }
+  const ranks = [...halves[0]].map((c) => RANK_OF[c]).concat([...halves[1]].map((c) => -RANK_OF[c])).sort(byRank);
+  if (ranks.length > 4) throw new Error(`${name}: at most four units`);
+  return ranks;
 }
 
 // ---- Indexing -----------------------------------------------------------------
-// raw = ((tile_0 * P + tile_1) * P + ...) * 2^n + movedBits) * 2 + sideBit
 function indexer(ranks) {
   const n = ranks.length, M = 1 << n;
-  const size = P ** n * M * 2;
   const groups = []; // runs of identical units, which are interchangeable
   for (let i = 0; i < n; ) {
     let j = i;
@@ -90,7 +106,7 @@ function indexer(ranks) {
   };
   return {
     n,
-    size,
+    size: P ** n * M * 2,
     decode(raw, tl, mv) {
       const sideBit = raw % 2;
       raw = (raw - sideBit) / 2;
@@ -119,6 +135,51 @@ function indexer(ranks) {
   };
 }
 
+const popcount = (x) => {
+  x -= (x >>> 1) & 0x55555555;
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+  return Math.imul((x + (x >>> 4)) & 0x0f0f0f0f, 0x01010101) >>> 24;
+};
+
+/** Rank directory over the canonical bitset: prefix[w] = canonical raws below word w. */
+function prefixOf(bits) {
+  const prefix = new Int32Array(bits.length + 1);
+  for (let w = 0; w < bits.length; w++) prefix[w + 1] = prefix[w] + popcount(bits[w]);
+  return prefix;
+}
+
+/** Calls fn(raw) for every canonical raw in increasing order (= increasing id). */
+function forEachCanonical(table, fn) {
+  const { bits } = table;
+  for (let w = 0; w < bits.length; w++) {
+    for (let word = bits[w]; word; word &= word - 1) fn(w * 32 + (31 - Math.clz32(word & -word)));
+  }
+}
+
+const idOfRaw = (table, raw) => table.prefix[raw >>> 5] + popcount(table.bits[raw >>> 5] & ((1 << (raw & 31)) - 1));
+
+// Units of a state as [signed rank, tile, moved], in material order
+function unitsOf(s) {
+  const units = [];
+  for (let p = 0; p < P; p++) if (s.u[PT[p]]) units.push([s.u[PT[p]], p, s.moved[PT[p]]]);
+  return units.sort((a, b) => b[0] - a[0]);
+}
+
+const scratchTl = new Int32Array(4), scratchMv = new Uint8Array(4);
+function idOfUnits(table, units, sideBit) {
+  units.forEach(([, p, m], i) => { scratchTl[i] = p; scratchMv[i] = m; });
+  return idOfRaw(table, table.ix.canonical(scratchTl, scratchMv, sideBit));
+}
+
+/** Value of a position in any solved table, reading colour mirrors from their counterpart. */
+function valueOf(units, sideBit) {
+  const name = nameOf(units.map((x) => x[0]));
+  const table = tables.get(name);
+  if (table) return table.val[idOfUnits(table, units, sideBit)];
+  const flipped = units.map(([v, p, m]) => [-v, p, m]).sort((a, b) => b[0] - a[0]);
+  return -tables.get(mirrorName(name)).val[idOfUnits(tables.get(mirrorName(name)), flipped, sideBit ^ 1)];
+}
+
 function stateOf(ranks, tl, mv, side) {
   const u = new Int8Array(V.N), moved = new Uint8Array(V.N);
   for (let i = 0; i < ranks.length; i++) { u[PT[tl[i]]] = ranks[i]; moved[PT[tl[i]]] = mv[i]; }
@@ -130,90 +191,121 @@ const tables = new Map();
 /**
  * Calls onEdge(id) for successors in the same table, and onKnown(sign, plies) for
  * the end of the game (plies 0) or a capture into a solved table (sign 0: unresolved).
- * Returns the number of legal moves.
  */
 function forEachSuccessor(table, s, onEdge, onKnown) {
-  const moves = V.legalMoves(s);
-  for (const m of moves) {
+  for (const m of V.legalMoves(s)) {
     const ns = V.applyMove(s, m);
     if (ns.winner) { onKnown(ns.winner, 0); continue; }
-    const units = [];
-    for (let p = 0; p < P; p++) if (ns.u[PT[p]]) units.push([ns.u[PT[p]], p, ns.moved[PT[p]]]);
-    units.sort((a, b) => b[0] - a[0]);
-    const tl = Int32Array.from(units, (x) => x[1]), mv = Uint8Array.from(units, (x) => x[2]);
-    const sideBit = ns.side === 1 ? 0 : 1;
-    if (units.length === table.ix.n) onEdge(table.idOf[table.ix.canonical(tl, mv, sideBit)]);
+    const units = unitsOf(ns), sideBit = ns.side === 1 ? 0 : 1;
+    if (units.length === table.ix.n) onEdge(idOfUnits(table, units, sideBit));
     else {
-      const v = lookup(tables.get(nameOf(units.map((x) => x[0]))), tl, mv, sideBit);
+      const v = valueOf(units, sideBit);
       onKnown(Math.sign(v), Math.abs(v));
     }
   }
-  return moves.length;
 }
-
-const lookup = (table, tl, mv, sideBit) => table.val[table.idOf[table.ix.canonical(tl, mv, sideBit)]];
 
 const distinct = (tl) => {
   for (let i = 0; i < tl.length; i++) for (let j = 0; j < i; j++) if (tl[i] === tl[j]) return false;
   return true;
 };
 
+// Growable Int32 list in 64 MB chunks (the move lists of four-unit tables run to 10^8)
+class IntList {
+  chunks = [];
+  length = 0;
+  push(v) {
+    const k = this.length >>> 24;
+    if (k === this.chunks.length) this.chunks.push(new Int32Array(1 << 24));
+    this.chunks[k][this.length++ & 0xffffff] = v;
+  }
+  get(i) { return this.chunks[i >>> 24][i & 0xffffff]; }
+}
+
 function solve(ranks) {
-  const started = Date.now();
+  const started = Date.now(), name = nameOf(ranks);
   const ix = indexer(ranks), n = ix.n;
   const tl = new Int32Array(n), mv = new Uint8Array(n);
 
   // Canonical positions
-  const idOf = new Int32Array(ix.size).fill(-1);
-  const rawList = [];
-  for (let raw = 0; raw < ix.size; raw++) {
-    const sideBit = ix.decode(raw, tl, mv);
-    if (distinct(tl) && ix.canonical(tl, mv, sideBit) === raw) { idOf[raw] = rawList.length; rawList.push(raw); }
+  let t = Date.now();
+  const bits = new Uint32Array(Math.ceil(ix.size / 32));
+  const block = ix.size / P; // raws per tile of the first unit
+  for (const p0 of ORBIT_MIN) {
+    for (let raw = p0 * block; raw < (p0 + 1) * block; raw++) {
+      const sideBit = ix.decode(raw, tl, mv);
+      if (distinct(tl) && ix.canonical(tl, mv, sideBit) === raw) bits[raw >>> 5] |= 1 << (raw & 31);
+    }
   }
-  const nodes = rawList.length;
-  const rawOf = Int32Array.from(rawList);
-  const table = { ranks, ix, idOf, rawOf, val: new Int16Array(nodes) };
+  const prefix = prefixOf(bits), nodes = prefix[bits.length];
+  const table = { ranks, ix, bits, prefix, val: new Int16Array(nodes) };
+  log(`${name}: ${nodes} positions (${seconds(t)})`);
 
-  // Forward pass: in-table edges, known results seeded into the bucket queue
-  const sideOf = new Int8Array(nodes), remaining = new Int32Array(nodes);
-  const edgeFrom = [], edgeTo = [];
-  const buckets = []; // buckets[d]: events "a successor of x ends in d plies with winner sign"
-  const push = (d, x, sign) => (buckets[d] ??= []).push(x * 2 + (sign === 1 ? 0 : 1));
-  for (let x = 0; x < nodes; x++) {
-    const side = ix.decode(rawOf[x], tl, mv) ? -1 : 1;
+  // Forward pass: in-table moves, plus the best and worst known results per position
+  t = Date.now();
+  const NONE = 0x7fff;
+  const sideOf = new Int8Array(nodes), remaining = new Uint8Array(nodes);
+  const winMin = new Int16Array(nodes).fill(NONE), lossMax = new Int16Array(nodes).fill(-1);
+  const first = new Int32Array(nodes + 1), succ = new IntList();
+  let x = 0;
+  forEachCanonical(table, (raw) => {
+    const side = ix.decode(raw, tl, mv) ? -1 : 1;
+    let open = 0;
     sideOf[x] = side;
-    remaining[x] = forEachSuccessor(
-      table,
-      stateOf(ranks, tl, mv, side),
-      (y) => { edgeFrom.push(x); edgeTo.push(y); },
-      (sign, d) => { if (sign) push(d, x, sign); },
-    );
-  }
+    first[x] = succ.length;
+    forEachSuccessor(table, stateOf(ranks, tl, mv, side), (y) => succ.push(y), (sign, d) => {
+      if (!sign) open = 1;
+      else if (sign === side) winMin[x] = Math.min(winMin[x], d);
+      else lossMax[x] = Math.max(lossMax[x], d);
+    });
+    // An unresolved capture keeps the count above zero, so the position is never lost
+    remaining[x] = succ.length - first[x] + open;
+    if (succ.length - first[x] + open > 255) throw new Error('more than 255 moves');
+    if (++x % 1000000 === 0) log(`${name}: ${x / 1e6}M / ${(nodes / 1e6).toFixed(1)}M positions expanded (${seconds(t)})`);
+  });
+  first[nodes] = succ.length;
+  const edges = succ.length;
+  log(`${name}: ${edges} in-table moves (${seconds(t)})`);
 
   // Predecessor lists (CSR)
   const start = new Int32Array(nodes + 1);
-  for (const y of edgeTo) start[y + 1]++;
+  for (let e = 0; e < edges; e++) start[succ.get(e) + 1]++;
   for (let i = 0; i < nodes; i++) start[i + 1] += start[i];
-  const preds = new Int32Array(edgeTo.length), fill = start.slice(0, nodes);
-  for (let e = 0; e < edgeTo.length; e++) preds[fill[edgeTo[e]]++] = edgeFrom[e];
+  const preds = new Int32Array(edges), fill = start.slice(0, nodes);
+  for (let from = 0; from < nodes; from++) for (let e = first[from]; e < first[from + 1]; e++) preds[fill[succ.get(e)]++] = from;
+  succ.chunks = null;
 
-  // Retrograde: events in increasing distance, so a win takes the shortest route
-  // and a loss the longest one
+  // Retrograde in layers of increasing distance d: a win takes the shortest route,
+  // a loss the longest one. A position whose last open move fails at layer d is
+  // lost at max(d, its worst known loss) + 1, unless a known win is still pending.
+  t = Date.now();
   const val = table.val;
-  for (let d = 0; d < buckets.length; d++) {
-    const b = buckets[d];
-    if (!b) continue;
-    for (const e of b) {
-      const x = e >> 1, sign = e & 1 ? -1 : 1;
-      if (val[x]) continue;
-      if (sign === sideOf[x] || --remaining[x] === 0) {
-        val[x] = sign * (d + 1);
-        for (let i = start[x]; i < start[x + 1]; i++) push(d + 1, preds[i], sign);
+  let horizon = 0;
+  const resolve = (x, v) => {
+    val[x] = v;
+    horizon = Math.max(horizon, Math.abs(v));
+  };
+  for (let x = 0; x < nodes; x++) {
+    if (winMin[x] !== NONE) horizon = Math.max(horizon, winMin[x]);
+    else if (!remaining[x]) resolve(x, -sideOf[x] * (lossMax[x] + 1));
+  }
+  for (let d = 0; d <= horizon; d++) {
+    for (let x = 0; x < nodes; x++) if (!val[x] && winMin[x] === d) resolve(x, sideOf[x] * (d + 1));
+    if (!d) continue;
+    for (let y = 0; y < nodes; y++) {
+      const v = val[y];
+      if (v !== d && v !== -d) continue;
+      const sign = v > 0 ? 1 : -1;
+      for (let i = start[y]; i < start[y + 1]; i++) {
+        const x = preds[i];
+        if (val[x]) continue;
+        if (sign === sideOf[x]) resolve(x, sign * (d + 1));
+        else if (--remaining[x] === 0 && winMin[x] === NONE) resolve(x, sign * (Math.max(d, lossMax[x]) + 1));
       }
     }
-    buckets[d] = null;
   }
-  tables.set(nameOf(ranks), table);
+  log(`${name}: retrograde ${horizon} plies (${seconds(t)})`);
+  tables.set(name, table);
 
   // Stats
   let blue = 0, red = 0, longest = 0;
@@ -225,9 +317,9 @@ function solve(ranks) {
   const errors = check(table);
   const pct = (k) => `${((100 * k) / nodes).toFixed(1)}%`.padStart(6);
   console.log(
-    `${nameOf(ranks).padEnd(6)} nodes ${String(nodes).padStart(8)}  edges ${String(edgeTo.length).padStart(9)}` +
+    `${name.padEnd(6)} nodes ${String(nodes).padStart(9)}  edges ${String(edges).padStart(10)}` +
       `  Blue ${pct(blue)}  Red ${pct(red)}  open ${pct(nodes - blue - red)}  longest ${String(longest).padStart(3)}` +
-      `  check ${errors ? `${errors} ERRORS` : 'ok'}  ${((Date.now() - started) / 1000).toFixed(1)}s`,
+      `  check ${errors ? `${errors} ERRORS` : 'ok'}  ${seconds(started)}`,
   );
   write(table);
   return errors;
@@ -251,30 +343,56 @@ function check(table) {
     };
     forEachSuccessor(table, stateOf(ranks, tl, mv, side), (y) => see(Math.sign(table.val[y]), Math.abs(table.val[y])), see);
     const expected = win < Infinity ? side * (win + 1) : open ? 0 : -side * (loss + 1);
-    if (lookup(table, tl, mv, sideBit) !== expected) errors++;
+    if (table.val[idOfRaw(table, ix.canonical(tl, mv, sideBit))] !== expected) errors++;
   }
   return errors;
 }
 
 function write(table) {
-  const dir = path.join(root, 'tablebase');
   fs.mkdirSync(dir, { recursive: true });
   const name = nameOf(table.ranks);
-  fs.writeFileSync(
-    path.join(dir, `${name}.tb`),
-    Buffer.concat([Buffer.from(table.rawOf.buffer), Buffer.from(table.val.buffer)]),
-  );
+  fs.writeFileSync(path.join(dir, `${name}.tb`), Buffer.concat([Buffer.from(table.bits.buffer), Buffer.from(table.val.buffer)]));
   fs.writeFileSync(
     path.join(dir, `${name}.json`),
     JSON.stringify({
+      format: FORMAT,
       ranks: table.ranks,
-      nodes: table.rawOf.length,
+      nodes: table.val.length,
+      words: table.bits.length,
       tiles: PT.map((t) => V.coords[t]),
-      layout: 'Int32 raw[nodes] then Int16 value[nodes]; raw = ((tile_0*61 + tile_1)*61 + ...)*2^n + movedBits)*2 + sideBit (1 = Red to move); value = plies to the end, + Blue wins, - Red wins, 0 unresolved',
+      layout:
+        'Uint32 bitset[words] of canonical raws, then Int16 value[nodes] in increasing raw order; ' +
+        'raw = ((tile_0*61 + tile_1)*61 + ...)*2^n + movedBits)*2 + sideBit (1 = Red to move); ' +
+        'value = plies to the end, + Blue wins, - Red wins, 0 unresolved',
     }, null, 1),
   );
 }
 
+function load(name) {
+  const metaPath = path.join(dir, `${name}.json`);
+  if (!fs.existsSync(metaPath)) return false;
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  if (meta.format !== FORMAT) return false;
+  const buf = fs.readFileSync(path.join(dir, `${name}.tb`));
+  const data = new Uint8Array(buf).buffer; // aligned copy
+  const bits = new Uint32Array(data, 0, meta.words);
+  tables.set(name, { ranks: meta.ranks, ix: indexer(meta.ranks), bits, prefix: prefixOf(bits), val: new Int16Array(data, meta.words * 4, meta.nodes) });
+  log(`${name}: loaded`);
+  return true;
+}
+
+/** Solves `ranks` (or loads it), after every table a capture leads into. */
+function ensure(ranks) {
+  const name = nameOf(ranks);
+  if (tables.has(name) || tables.has(mirrorName(name)) || load(name) || load(mirrorName(name))) return 0;
+  let errors = 0;
+  for (let i = 0; i < ranks.length; i++) {
+    if (Math.abs(ranks[i]) !== 4) errors += ensure(ranks.filter((_, j) => j !== i));
+  }
+  return errors + solve(ranks);
+}
+
+const names = process.argv.slice(2);
 let errors = 0;
-for (const ranks of materials(MAX_UNITS)) errors += solve(ranks);
+for (const name of names.length ? names : DEFAULT_MATERIALS) errors += ensure(parseMaterial(name));
 process.exit(errors ? 1 : 0);
