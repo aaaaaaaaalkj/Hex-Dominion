@@ -80,6 +80,13 @@ export function influenceOf(u: Int8Array): Int16Array {
   return I;
 }
 
+/** A state from signed ranks and moved flags over all N tiles. */
+export function makeState(u: Int8Array, moved: Uint8Array, side: Side, round = 1, winner: 0 | Side = 0): VectorState {
+  const s: VectorState = { u, moved, I: influenceOf(u), side, winner, round, h1: 0, h2: 0 };
+  rehash(s);
+  return s;
+}
+
 /** Builds a vector state from the app's GameState (Dominion). */
 export function fromGameState(state: GameState): VectorState {
   const u = new Int8Array(N), moved = new Uint8Array(N);
@@ -89,18 +96,8 @@ export function fromGameState(state: GameState): VectorState {
     u[t] = (x.team === 'player' ? 1 : -1) * x.rank;
     moved[t] = x.hasMovedThisRound ? 1 : 0;
   }
-  const s: VectorState = {
-    u,
-    moved,
-    I: influenceOf(u),
-    side: state.currentTurn === 'player' ? 1 : -1,
-    winner: state.winner === 'player' ? 1 : state.winner === 'ai' ? -1 : 0,
-    round: state.roundNumber,
-    h1: 0,
-    h2: 0,
-  };
-  rehash(s);
-  return s;
+  const winner = state.winner === 'player' ? 1 : state.winner === 'ai' ? -1 : 0;
+  return makeState(u, moved, state.currentTurn === 'player' ? 1 : -1, state.roundNumber, winner);
 }
 
 // ---- Move generation ------------------------------------------------------------
@@ -256,8 +253,9 @@ const isCapture = (s: VectorState, m: number) => m !== PASS && s.u[m & 127] !== 
 const captureKey = (s: VectorState, m: number) =>
   isCapture(s, m) ? 8 * Math.abs(s.u[m & 127]) - Math.abs(s.u[m >> 7]) : -100;
 
+// The clock is read every 32 nodes: often enough for a slow evaluator (valueNet.ts)
 function tick(ctx: SearchContext) {
-  if ((++ctx.nodes & 4095) === 0 && Date.now() > ctx.deadline) throw new Timeout();
+  if ((++ctx.nodes & 31) === 0 && Date.now() > ctx.deadline) throw new Timeout();
 }
 
 /**
