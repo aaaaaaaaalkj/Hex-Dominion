@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from hexdata import augment, encode, load_records, material_key, sample_table, table_names
+from hexdata import augment, encode, load_records, material_key, material_score, sample_table, table_names
 from model import ValueNet
 
 parser = argparse.ArgumentParser()
@@ -37,6 +37,7 @@ parser.add_argument('--lr', type=float, default=2e-3)
 parser.add_argument('--channels', type=int, default=32)
 parser.add_argument('--blocks', type=int, default=4)
 parser.add_argument('--threads', type=int, default=3)
+parser.add_argument('--init', help='checkpoint to start from')
 parser.add_argument('--out', default=str(Path(__file__).parent / 'checkpoints' / 'value.pt'))
 args = parser.parse_args()
 torch.set_num_threads(args.threads)
@@ -83,6 +84,8 @@ val_keys = np.array([material_key(u, s) for u, s in zip(val[0], val[2])])
 
 # ---- Model ----------------------------------------------------------------------
 model = ValueNet(args.channels, args.blocks)
+if args.init:
+    model.load_state_dict(torch.load(args.init)['model'])
 print(f'parameters {sum(p.numel() for p in model.parameters())}', flush=True)
 steps = args.epochs * (len(train[0]) // args.batch)
 opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -117,9 +120,18 @@ def report():
     if extra_val is not None:
         ep = predict(extra_val)
         et = extra_val[3]
-        decided = np.abs(et) > 0.3
-        sign = (np.sign(ep[decided]) == np.sign(et[decided])).mean() if decided.any() else float('nan')
-        lines.append(f'  extra val: mse {np.mean((ep - et) ** 2):.4f}  sign agreement on decided {sign:.4f}')
+        score = material_score(extra_val[0], extra_val[2])
+        base = np.tanh(score / 300)
+
+        def agree(p, sel):
+            sel = sel & (np.abs(et) > 0.3)
+            return (np.sign(p[sel]) == np.sign(et[sel])).mean() if sel.any() else float('nan')
+
+        everything, balanced = np.ones(len(et), bool), score == 0
+        lines.append(f'  extra val: mse {np.mean((ep - et) ** 2):.4f}  sign agreement on decided {agree(ep, everything):.4f}'
+                     f'  (material only: mse {np.mean((base - et) ** 2):.4f}, sign {agree(base, everything):.4f})')
+        lines.append(f'    balanced material n {balanced.sum()}: mse {np.mean((ep[balanced] - et[balanced]) ** 2):.4f}'
+                     f'  sign agreement on decided {agree(ep, balanced):.4f}')
         metrics['extra_mse'] = float(np.mean((ep - et) ** 2))
     print('\n'.join(lines), flush=True)
     return metrics

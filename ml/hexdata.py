@@ -94,6 +94,16 @@ def augment(u, moved, rng):
     return np.take_along_axis(u, inv, axis=1), np.take_along_axis(moved, inv, axis=1)
 
 
+# Unit values of the engine's evaluation (VALUE in vectorEngine.ts), in Scouts x 100
+VALUE = np.array([0, 100, 400, 250, 0])
+
+
+def material_score(u, side):
+    """The engine's material balance from the side to move's view."""
+    own = u.astype(int) * side[:, None]
+    return np.where(own > 0, VALUE[np.abs(own)], 0).sum(1) - np.where(own < 0, VALUE[np.abs(own)], 0).sum(1)
+
+
 def material_key(u, side):
     """Material from the side to move's view, e.g. 'KS-KC' (own first)."""
     own = u.astype(int) * side
