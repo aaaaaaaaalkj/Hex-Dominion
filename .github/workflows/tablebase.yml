@@ -1,0 +1,95 @@
+# Solve Dominion endgame tablebases (scripts/tablebase.mjs) on GitHub's runners,
+# one job per material, and collect them into a single downloadable artifact
+name: Endgame tablebases
+
+on:
+  workflow_dispatch:
+    inputs:
+      materials:
+        description: "Space-separated four-unit materials, e.g. KS-KS KGG-K"
+        required: true
+        default: "KS-KS KC-KC KG-KG KS-KC KS-KG KC-KG"
+
+permissions:
+  contents: read
+
+jobs:
+  # The three-unit tables every four-unit material captures into (about a minute)
+  base:
+    runs-on: ubuntu-latest
+    outputs:
+      materials: ${{ steps.matrix.outputs.materials }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Solve the tables up to three units
+        run: node scripts/tablebase.mjs K-K KS-K KC-K KG-K
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb-base
+          path: tablebase/
+      - name: Materials as a job matrix
+        id: matrix
+        env:
+          MATERIALS: ${{ inputs.materials }}
+        run: echo "materials=$(echo "$MATERIALS" | jq -Rc 'split(" ") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
+
+  # One four-unit table per job: about 30-40 min and 4 GB each
+  solve:
+    needs: base
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        material: ${{ fromJSON(needs.base.outputs.materials) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Download the three-unit tables
+        uses: actions/download-artifact@v4
+        with:
+          name: tb-base
+          path: tablebase/
+      - name: Solve ${{ matrix.material }}
+        run: node scripts/tablebase.mjs ${{ matrix.material }}
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb-${{ matrix.material }}
+          path: |
+            tablebase/${{ matrix.material }}.tb
+            tablebase/${{ matrix.material }}.json
+
+  # Everything in one artifact named "tablebase"
+  collect:
+    needs: solve
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tb-*
+          path: tablebase/
+          merge-multiple: true
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: tablebase
+          path: tablebase/
