@@ -6,9 +6,11 @@
  *
  * Strategies:
  *   random                         uniformly random legal moves
- *   search:<ms>[:depth=N]          the alpha-beta engine (vectorEngine.ts) with <ms> per move,
- *                                  searching at most N plies deep
- *   net:<ms>[:depth=N,units=N]     the alpha-beta engine scoring positions with the value
+ *   search:<ms>[:depth=N,forced=R] the alpha-beta engine (vectorEngine.ts) with <ms> per move,
+ *                                  searching at most N plies deep; units of rank >= R (4 King,
+ *                                  3 General) may not stand pat in the quiescence search
+ *   net:<ms>[:depth=N,units=N,forced=R]
+ *                                  the alpha-beta engine scoring positions with the value
  *                                  network (valueNet.ts) where at most N units are left, and
  *                                  with the hand-written evaluation elsewhere; the weights
  *                                  are $VALUE_NET or ml/checkpoints/value-net.json (ml/export.py)
@@ -43,6 +45,10 @@ const C = await server.ssrLoadModule('/src/utils/concentrationAI.ts');
 const NET = await server.ssrLoadModule('/src/utils/valueNet.ts');
 
 const options = (arg) => Object.fromEntries(arg.split(',').filter(Boolean).map((kv) => kv.split('=')));
+const searchOptions = (arg) => {
+  const { depth = 30, forced } = options(arg);
+  return { maxDepth: Number(depth), forcedRank: forced ? Number(forced) : undefined };
+};
 
 let valueNet;
 function loadNet() {
@@ -68,13 +74,13 @@ function strategy(spec) {
   const [kind, arg = '', arg2 = ''] = spec.split(':');
   if (kind === 'random') return (s) => { const ms = V.legalMoves(s); return ms[Math.floor(Math.random() * ms.length)]; };
   if (kind === 'search') {
-    const { depth = 30 } = options(arg2);
-    return (s) => V.chooseMove(s, Number(arg || 50), Number(depth));
+    const o = searchOptions(arg2);
+    return (s) => V.chooseMove(s, Number(arg || 50), o);
   }
   if (kind === 'net') {
-    const { depth = 30, units = Infinity } = options(arg2);
-    const evaluator = NET.netEvaluator(loadNet(), Number(units));
-    return (s) => V.chooseMove(s, Number(arg || 50), Number(depth), 0, evaluator);
+    const { units = Infinity } = options(arg2);
+    const o = { ...searchOptions(arg2), evaluator: NET.netEvaluator(loadNet(), Number(units)) };
+    return (s) => V.chooseMove(s, Number(arg || 50), o);
   }
   if (kind === 'conc') {
     const w = weights(arg);
@@ -82,7 +88,7 @@ function strategy(spec) {
   }
   if (kind === 'hybrid') {
     const evaluator = C.asEvaluator(weights(arg2));
-    return (s) => V.chooseMove(s, Number(arg || 50), 30, 0, evaluator).move;
+    return (s) => V.chooseMove(s, Number(arg || 50), { evaluator }).move;
   }
   throw new Error(`Unknown strategy ${spec}`);
 }
@@ -137,6 +143,7 @@ for (let p = 0; p < Number(pairs); p++) {
     else if (r.winner === aSide) w++;
     else l++;
   }
+  console.error(`pair ${p + 1}/${pairs}: +${w} =${d} -${l}`);
 }
 const n = w + d + l;
 console.log(

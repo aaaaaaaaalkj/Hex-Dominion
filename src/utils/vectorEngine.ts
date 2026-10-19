@@ -240,6 +240,7 @@ interface SearchContext {
   tt: Map<number, { lo: number; hi: number }>[];
   evaluate: Evaluator;
   probe?: Prober;
+  forcedRank?: number;
 }
 
 /** Static score of a non-terminal position from Red's point of view (|score| well below WIN). */
@@ -261,7 +262,8 @@ function tick(ctx: SearchContext) {
 /**
  * Capture-only search at the horizon, so a position is never scored in the
  * middle of an exchange. The side to move may "stand pat" on the static score
- * instead of capturing.
+ * instead of capturing, except when the unit due to move has at least
+ * ctx.forcedRank: a King or General must move (zugzwang), so all its moves are tried.
  */
 function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext, qDepth: number): number {
   tick(ctx);
@@ -270,16 +272,20 @@ function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext
   const standPat = s.winner ? evaluate(s) : ctx.evaluate(s);
   if (s.winner || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
   const maximizing = s.side === -1;
-  if (maximizing) {
-    if (standPat >= beta) return standPat;
-    if (standPat > alpha) alpha = standPat;
-  } else {
-    if (standPat <= alpha) return standPat;
-    if (standPat < beta) beta = standPat;
+  const legal = legalMoves(s);
+  const forced = ctx.forcedRank !== undefined && legal[0] !== PASS && Math.abs(s.u[legal[0] >> 7]) >= ctx.forcedRank;
+  if (!forced) {
+    if (maximizing) {
+      if (standPat >= beta) return standPat;
+      if (standPat > alpha) alpha = standPat;
+    } else {
+      if (standPat <= alpha) return standPat;
+      if (standPat < beta) beta = standPat;
+    }
   }
-  const captures = legalMoves(s).filter((m) => isCapture(s, m));
+  const captures = forced ? legal : legal.filter((m) => isCapture(s, m));
   captures.sort((a, b) => captureKey(s, b) - captureKey(s, a));
-  let best = standPat;
+  let best = forced ? (maximizing ? -Infinity : Infinity) : standPat;
   for (const m of captures) {
     const v = quiesce(applyMove(s, m), alpha, beta, ctx, qDepth + 1);
     if (maximizing) { if (v > best) best = v; if (v > alpha) alpha = v; }
@@ -353,20 +359,24 @@ export interface VectorChoice {
   nodes: number;
 }
 
+export interface SearchOptions {
+  maxDepth?: number;
+  /** Moves within this margin of the best are chosen from at random. */
+  randomMargin?: number;
+  evaluator?: Evaluator;
+  probe?: Prober;
+  /** Units of at least this rank may not stand pat in the quiescence search (see quiesce). */
+  forcedRank?: number;
+}
+
 /**
  * Picks a move for the side to move (the in-game AI). Alpha-beta at the root too,
  * so only moves within `randomMargin` of the best get exact scores; one of those
  * is chosen at random, unless the result is forced.
  */
-export function chooseMove(
-  s: VectorState,
-  budgetMs: number,
-  maxDepth = 30,
-  randomMargin = 0,
-  evaluator: Evaluator = evaluate,
-  probe?: Prober
-): VectorChoice | null {
-  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator, probe };
+export function chooseMove(s: VectorState, budgetMs: number, options: SearchOptions = {}): VectorChoice | null {
+  const { maxDepth = 30, randomMargin = 0, evaluator = evaluate, probe, forcedRank } = options;
+  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator, probe, forcedRank };
   const moves = legalMoves(s);
   if (moves.length === 0) return null;
   if (moves.length === 1) return { move: moves[0], score: 0, depth: 0, nodes: 0 };
@@ -450,7 +460,7 @@ export function chooseDominionAction(
   const s = fromGameState(state);
   const budget =
     options.quietTimeLimitMs !== undefined && isQuiet(s) ? options.quietTimeLimitMs : options.timeLimitMs ?? 1200;
-  const choice = chooseMove(s, budget, options.maxDepth ?? 30, options.randomMargin ?? 0);
+  const choice = chooseMove(s, budget, { maxDepth: options.maxDepth, randomMargin: options.randomMargin });
   if (!choice) return null;
   const action = toGameAction(state, tiles, choice.move);
   return { action, score: choice.score, depth: choice.depth, nodes: choice.nodes, timeMs: Date.now() - started };

@@ -99,7 +99,7 @@ while (Date.now() < deadline) {
       candidates.push(s);
       sinceKept = 0;
     }
-    s = V.applyMove(s, V.chooseMove(s, PLAY_MS, 30, PLAY_MARGIN, V.evaluate, store.probe).move);
+    s = V.applyMove(s, V.chooseMove(s, PLAY_MS, { randomMargin: PLAY_MARGIN, probe: store.probe }).move);
   }
   games++;
   // PER_GAME random candidates, in game order
