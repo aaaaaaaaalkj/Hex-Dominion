@@ -24,6 +24,7 @@ interface GameOverModalProps {
   playerDefeats: number;
   aiDefeats: number;
   lastMove: MoveRecord | null;
+  selfPlay?: boolean; // the AI played both sides
   onRestart: () => void;
   onInspectBoard: () => void;
   onExportText: () => void;
@@ -41,6 +42,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   playerDefeats,
   aiDefeats,
   lastMove,
+  selfPlay,
   onRestart,
   onInspectBoard,
   onExportText,
@@ -50,9 +52,22 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   const isDraw = winner === null;
   const isGambit = mode === 'gambit';
 
-  const title = isDraw ? 'Draw' : isPlayerWinner ? 'Glorious Victory' : 'Defeat in Battle';
+  const loser = isPlayerWinner ? 'Red' : 'Blue';
+  const title = isDraw
+    ? 'Draw'
+    : selfPlay
+    ? `${isPlayerWinner ? 'Blue' : 'Red'} Wins`
+    : isPlayerWinner
+    ? 'Glorious Victory'
+    : 'Defeat in Battle';
   const subtitle =
-    endReason === 'timeout'
+    selfPlay && !isDraw
+      ? endReason === 'timeout'
+        ? `${loser} ran out of time.`
+        : endReason === 'checkmate'
+        ? `Checkmate: ${loser}'s King has no escape.`
+        : `${loser}'s King was struck down.`
+      : endReason === 'timeout'
       ? isPlayerWinner
         ? 'Your opponent ran out of time.'
         : 'You ran out of time.'

@@ -1,6 +1,6 @@
 /**
  * Dominion on the vector model: the fast engine behind the Dominion AI and the
- * remote analyzer (scripts/remote-assist.mjs).
+ * training scripts (scripts/label-positions.mjs, scripts/ai-match.mjs).
  *
  * The board is embedded in a radius-5 hexagon (one "ghost ring" around the
  * playable radius-4 board) so every tile has a full neighbourhood:

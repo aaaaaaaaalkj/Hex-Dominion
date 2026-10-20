@@ -12,18 +12,15 @@ import {
 } from './types/game';
 import { generateGameMap } from './utils/mapGenerator';
 import { applyMove, computeInfluenceMap, countInfluencedTiles } from './utils/gameRules';
-import { advanceTurn, applyAction, dominionMoveRank, EndReason, getActions, getUnitMoves } from './utils/gameState';
+import { advanceTurn, applyAction, dominionMoveRank, EndReason, getUnitMoves } from './utils/gameState';
 import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
-import { actionKey, buildRemoteSnapshot, pollRemoteMove, postRemoteState } from './utils/remoteOpponent';
 import {
   addIncrement,
   CLOCK_PRESETS,
   ClockState,
-  formatClock,
   startClock,
   switchClock,
-  timeLeft,
 } from './utils/clock';
 import { soundEffects } from './utils/soundEffects';
 import { generateGameLogText, downloadGameLog } from './utils/gameExporter';
@@ -46,15 +43,13 @@ import {
 const MODE_STORAGE_KEY = 'hexdominion-mode';
 const OPPONENT_STORAGE_KEY = 'hexdominion-opponent';
 
-// Who plays red: the built-in search AI, or Claude through the dev server relay
-type Opponent = 'ai' | 'claude';
-const OPPONENT_NAMES: Record<Opponent, string> = { ai: 'Search AI', claude: 'Claude' };
-// The relay only exists on the dev server (vite.config.ts)
-const REMOTE_AVAILABLE = import.meta.env.DEV;
+// Who plays: you against the AI, or the AI against itself (you watch)
+type Opponent = 'ai' | 'selfplay';
+const OPPONENT_NAMES: Record<Opponent, string> = { ai: 'vs AI', selfplay: 'AI vs AI' };
 
 function loadSavedOpponent(): Opponent {
   try {
-    return REMOTE_AVAILABLE && localStorage.getItem(OPPONENT_STORAGE_KEY) === 'claude' ? 'claude' : 'ai';
+    return localStorage.getItem(OPPONENT_STORAGE_KEY) === 'selfplay' ? 'selfplay' : 'ai';
   } catch {
     return 'ai';
   }
@@ -85,7 +80,7 @@ export default function App() {
   const modeRef = React.useRef(mode);
   modeRef.current = mode;
   const [opponent, setOpponent] = useState<Opponent>(loadSavedOpponent);
-  const opponentName = REMOTE_AVAILABLE && opponent === 'claude' ? 'Claude' : 'The AI';
+  const selfPlay = opponent === 'selfplay';
 
   // Game Board State
   const [tiles, setTiles] = useState<Map<string, HexTile>>(() => new Map());
@@ -149,6 +144,7 @@ export default function App() {
   const AI_QUIET_TIME_LIMIT_MS = 300;
   const AI_RANDOM_MARGIN = 8;
   const AI_MIN_THINK_MS = 300;
+  const SELFPLAY_MOVE_MS = 2000; // pace of AI vs AI, slow enough to follow
 
   // State refs to ensure AI effect reads latest state without cancelling timers
   const tilesRef = React.useRef(tiles);
@@ -248,9 +244,6 @@ export default function App() {
     setLegalMoves(movesOf(selectedUnit));
   }, [selectedUnit, movesOf]);
 
-  const opponentNameRef = React.useRef(opponentName);
-  opponentNameRef.current = opponentName;
-
   // Check if round should transition or initiative should switch
   const evaluateNextTurn = useCallback(
     (
@@ -268,8 +261,8 @@ export default function App() {
       if (next.waiting) {
         setTurnNotice(
           next.waiting === 'player'
-            ? `None of your remaining units can move · ${opponentNameRef.current} continues`
-            : `${opponentNameRef.current} has no legal moves · you continue`
+            ? `None of Blue's remaining units can move · Red continues`
+            : `Red has no legal moves · Blue continues`
         );
       }
 
@@ -410,7 +403,7 @@ export default function App() {
   // Player selects an active unit
   const handleSelectUnit = useCallback(
     (unit: Unit) => {
-      if (unit.team !== 'player' || currentTurn !== 'player' || isAiThinking || gameEnded) return;
+      if (selfPlay || unit.team !== 'player' || currentTurn !== 'player' || isAiThinking || gameEnded) return;
 
       if (unit.hasMovedThisRound) {
         return;
@@ -429,16 +422,16 @@ export default function App() {
       setLegalMoves(moves);
       soundEffects.playSelect();
     },
-    [currentTurn, isAiThinking, gameEnded, selectedUnit, movesOf]
+    [selfPlay, currentTurn, isAiThinking, gameEnded, selectedUnit, movesOf]
   );
 
   // Player executes move on target hex
   const handlePlayerMove = useCallback(
     (move: LegalMove) => {
-      if (!selectedUnit || currentTurn !== 'player' || isAiThinking || gameEnded) return;
+      if (selfPlay || !selectedUnit || currentTurn !== 'player' || isAiThinking || gameEnded) return;
       executeMove(selectedUnit, move);
     },
-    [selectedUnit, currentTurn, isAiThinking, gameEnded, executeMove]
+    [selfPlay, selectedUnit, currentTurn, isAiThinking, gameEnded, executeMove]
   );
 
   // Execute move and evaluate turn refs to avoid stale closures
@@ -463,72 +456,11 @@ export default function App() {
     return () => worker.terminate();
   }, []);
 
-  // Claude's turn: post the position to the dev server relay and wait for its answer
-  useEffect(() => {
-    // REMOTE_AVAILABLE is a build-time constant: production builds drop this effect
-    if (!REMOTE_AVAILABLE || opponent !== 'claude' || currentTurn !== 'ai' || gameEnded) return;
-
-    setIsAiThinking(true);
-    const tiles = tilesRef.current;
-    const units = unitsRef.current;
-    const state = {
-      mode: modeRef.current,
-      units,
-      currentTurn: 'ai' as Team,
-      roundNumber: roundNumberRef.current,
-      winner: null,
-      quietMoves: quietMovesRef.current,
-    };
-    const actions = getActions(state, tiles);
-    const history = moveHistoryRef.current;
-    const token = `${Date.now().toString(36)}-${history.length}`;
-    const abort = new AbortController();
-
-    const c = clockRef.current;
-    const clockLine = c
-      ? `Clock: you ${formatClock(timeLeft(c, 'ai', Date.now()))}, Blue ${formatClock(timeLeft(c, 'player', Date.now()))} (+${clockPresetRef.current.incrementMs / 1000}s per move). Your clock is running.`
-      : undefined;
-    const text = buildRemoteSnapshot({ state, tiles, actions, history, clockLine });
-
-    const position = {
-      state,
-      actionKeys: actions.map(actionKey),
-      clock: c
-        ? {
-            ai: timeLeft(c, 'ai', Date.now()),
-            player: timeLeft(c, 'player', Date.now()),
-            incrementMs: clockPresetRef.current.incrementMs,
-          }
-        : null,
-    };
-    postRemoteState(token, text, history.length, position)
-      .then(() => pollRemoteMove(token, abort.signal))
-      .then((index) => {
-        if (index === null || abort.signal.aborted) return;
-        const action = actions[index];
-        const actingUnit =
-          action?.kind === 'move' ? unitsRef.current.find((u) => u.id === action.unitId) : undefined;
-        if (action?.kind === 'move' && actingUnit) {
-          executeMoveRef.current(actingUnit, action.move);
-        } else if (action?.kind === 'pass') {
-          evaluateNextTurnRef.current('ai', tilesRef.current, unitsRef.current);
-        } else {
-          console.error(`Claude sent an invalid move index: ${index}`);
-          setTurnTrigger((t) => t + 1); // re-post the position
-          return;
-        }
-        setIsAiThinking(false);
-      })
-      .catch((err) => console.error('Remote opponent relay failed', err));
-
-    return () => abort.abort();
-  }, [opponent, currentTurn, gameEnded, turnTrigger]);
-
-  // AI Turn Execution Loop
+  // AI Turn Execution Loop: red's turns, and blue's too in self-play (which waits
+  // while the tab is not focused, so no moves are missed)
   useEffect(() => {
     const worker = aiWorkerRef.current;
-    if (opponent !== 'ai') return;
-    if (currentTurn !== 'ai' || gameEnded || !worker) {
+    if ((currentTurn !== 'ai' && !selfPlay) || (selfPlay && !focused) || gameEnded || !worker) {
       setIsAiThinking(false);
       return;
     }
@@ -541,7 +473,8 @@ export default function App() {
     const onMessage = (e: MessageEvent<AIResponse>) => {
       if (e.data.requestId !== requestId) return; // stale reply (new game or turn changed)
       const { result } = e.data;
-      const delay = Math.max(0, AI_MIN_THINK_MS - (performance.now() - startedAt));
+      const minMs = selfPlay ? SELFPLAY_MOVE_MS : AI_MIN_THINK_MS;
+      const delay = Math.max(0, minMs - (performance.now() - startedAt));
 
       applyTimer = setTimeout(() => {
         const currentUnits = unitsRef.current;
@@ -552,8 +485,8 @@ export default function App() {
         if (action?.kind === 'move' && actingUnit) {
           executeMoveRef.current(actingUnit, action.move);
         } else {
-          // Fallback: no AI unit can move, hand the turn on
-          evaluateNextTurnRef.current('ai', tilesRef.current, currentUnits);
+          // Fallback: no unit of the side to move can move, hand the turn on
+          evaluateNextTurnRef.current(currentTurn, tilesRef.current, currentUnits);
         }
         setIsAiThinking(false);
       }, delay);
@@ -565,7 +498,7 @@ export default function App() {
       state: {
         mode: modeRef.current,
         units: unitsRef.current,
-        currentTurn: 'ai',
+        currentTurn,
         roundNumber: roundNumberRef.current,
         winner: null,
         quietMoves: quietMovesRef.current,
@@ -583,7 +516,7 @@ export default function App() {
       worker.removeEventListener('message', onMessage);
       clearTimeout(applyTimer);
     };
-  }, [opponent, currentTurn, gameEnded, turnTrigger]);
+  }, [selfPlay, focused, currentTurn, gameEnded, turnTrigger]);
 
   // Clock: run the side on turn once the first move is made; stop when the game
   // ends, and while the tab is not focused
@@ -740,12 +673,20 @@ export default function App() {
           <span className="font-medium text-slate-300">
             {gameEnded ? (
               <span className="font-bold text-white">
-                {isDraw ? 'Draw' : winner === 'player' ? 'Victory Achieved' : 'Defeated in Battle'}
+                {isDraw
+                  ? 'Draw'
+                  : selfPlay
+                  ? `${winner === 'player' ? 'Blue' : 'Red'} wins`
+                  : winner === 'player'
+                  ? 'Victory Achieved'
+                  : 'Defeated in Battle'}
               </span>
             ) : (
               <>
                 {mode === 'gambit' ? 'Move' : 'Round'} {roundNumber} ·{' '}
-                {currentTurn === 'player'
+                {selfPlay
+                  ? `${currentTurn === 'player' ? 'Blue' : 'Red'} thinking...`
+                  : currentTurn === 'player'
                   ? selectedUnit
                     ? legalMoves.length === 0
                       ? (
@@ -764,7 +705,7 @@ export default function App() {
                     : mode === 'dominion' && moveRank !== null
                     ? `Your Turn · move ${moveRank === 4 ? 'your' : 'a'} ${UNIT_DEFINITIONS[moveRank].name}`
                     : 'Your Turn'
-                  : `${opponentName} thinking...`}
+                  : 'The AI thinking...'}
                 {sideToMoveInCheck && <span className="ml-1.5 font-bold text-rose-400">Check!</span>}
               </>
             )}
@@ -820,31 +761,30 @@ export default function App() {
           ))}
         </div>
 
-        {/* Opponent Switch (dev server only: Claude plays through the relay) */}
-        {REMOTE_AVAILABLE && (
-          <div className="flex items-center p-0.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl text-xs font-semibold">
-            {(['ai', 'claude'] as Opponent[]).map((o) => (
-              <button
-                key={o}
-                onClick={() => {
-                  if (o === opponent) return;
-                  setOpponent(o);
-                  try {
-                    localStorage.setItem(OPPONENT_STORAGE_KEY, o);
-                  } catch {
-                    // Persisting the opponent is only a convenience
-                  }
-                }}
-                title={o === 'claude' ? 'Claude plays red from a Claude Code session via .remote/' : 'Built-in search AI plays red'}
-                className={`px-2.5 py-1 rounded-lg transition-colors ${
-                  o === opponent ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {OPPONENT_NAMES[o]}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Opponent Switch: switching keeps the current game going */}
+        <div className="flex items-center p-0.5 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur-md shadow-xl text-xs font-semibold">
+          {(['ai', 'selfplay'] as Opponent[]).map((o) => (
+            <button
+              key={o}
+              onClick={() => {
+                if (o === opponent) return;
+                setOpponent(o);
+                setSelectedUnit(null);
+                try {
+                  localStorage.setItem(OPPONENT_STORAGE_KEY, o);
+                } catch {
+                  // Persisting the opponent is only a convenience
+                }
+              }}
+              title={o === 'selfplay' ? 'Watch the AI play both sides' : 'Play blue against the AI'}
+              className={`px-2.5 py-1 rounded-lg transition-colors ${
+                o === opponent ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {OPPONENT_NAMES[o]}
+            </button>
+          ))}
+        </div>
 
         {/* Time control (switching starts a new match) */}
         <button
@@ -977,6 +917,7 @@ export default function App() {
           playerDefeats={stats.playerDefeats}
           aiDefeats={stats.aiDefeats}
           lastMove={lastMove}
+          selfPlay={selfPlay}
           onRestart={() => initGame()}
           onInspectBoard={() => {
             setReplayIndex(moveHistory.length);
