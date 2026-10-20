@@ -1,0 +1,99 @@
+# Plays two Dominion strategies against each other (scripts/ai-match.mjs) on
+# GitHub's runners: each job runs one match per core, and the last job adds up
+# the results of all of them
+name: AI match
+
+on:
+  workflow_dispatch:
+    inputs:
+      a:
+        description: "Strategy A, e.g. net:1200"
+        required: true
+      b:
+        description: "Strategy B, e.g. conc"
+        required: true
+      jobs:
+        description: "Parallel jobs (one match per core each)"
+        default: "10"
+      pairs:
+        description: "Game pairs per match (colours swapped within a pair)"
+        default: "5"
+      opening:
+        description: "Random opening plies"
+        default: "4"
+      net:
+        description: "Value network weights for net: strategies (path in the repository)"
+        default: "src/data/value-net.json"
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.matrix.outputs.jobs }}
+    steps:
+      - id: matrix
+        env:
+          JOBS: ${{ inputs.jobs }}
+        run: echo "jobs=$(jq -nc --argjson n "$JOBS" '[range(1; $n + 1)]')" >> "$GITHUB_OUTPUT"
+
+  play:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.matrix.outputs.jobs) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Play
+        env:
+          A: ${{ inputs.a }}
+          B: ${{ inputs.b }}
+          PAIRS: ${{ inputs.pairs }}
+          OPENING: ${{ inputs.opening }}
+          VALUE_NET: ${{ inputs.net }}
+        run: |
+          mkdir -p results
+          for w in $(seq 1 "$(nproc)"); do
+            node scripts/ai-match.mjs "$A" "$B" "$PAIRS" "$OPENING" > "results/${{ matrix.job }}-$w.txt" &
+          done
+          wait
+          cat results/*.txt
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.job }}
+          path: results/*.txt
+
+  summary:
+    needs: play
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: results/
+          merge-multiple: true
+      - name: Add up
+        run: |
+          cat results/*.txt
+          # Lines look like "A vs B: +W =D -L  score ..."
+          cat results/*.txt | sed -nE 's/.*: \+([0-9]+) =([0-9]+) -([0-9]+) .*/\1 \2 \3/p' |
+            awk '{ w += $1; d += $2; l += $3 } END {
+              n = w + d + l; s = (w + d / 2) / n; se = sqrt(s * (1 - s) / n)
+              printf "Total for A: +%d =%d -%d  score %.1f%% (+/- %.1f%%) over %d games\n", w, d, l, 100 * s, 100 * se, n
+            }' | tee -a "$GITHUB_STEP_SUMMARY"
