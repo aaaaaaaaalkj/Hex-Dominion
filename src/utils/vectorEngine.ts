@@ -399,14 +399,14 @@ export function chooseMove(s: VectorState, budgetMs: number, options: SearchOpti
   const sign = s.side === -1 ? 1 : -1; // converts Red's point of view to the mover's
   let root = moves
     .sort((a, b) => captureKey(s, b) - captureKey(s, a))
-    .map((move) => ({ move, score: -Infinity }));
-  let scored = [{ move: root[0].move, score: 0 }];
+    .map((move) => ({ move, score: -Infinity, exact: false }));
+  let scored = [{ move: root[0].move, score: 0, exact: true }];
   let bestScore = -Infinity;
   let reachedDepth = 0;
 
   for (let d = 1; d <= maxDepth; d++) {
     let alpha = -Infinity; // mover's point of view
-    const iteration: { move: number; score: number }[] = [];
+    const iteration: { move: number; score: number; exact: boolean }[] = [];
     let timedOut = false;
     try {
       for (const entry of root) {
@@ -419,7 +419,10 @@ export function chooseMove(s: VectorState, budgetMs: number, options: SearchOpti
           ctx
         );
         entry.score = sign * v;
-        iteration.push({ move: entry.move, score: entry.score });
+        // At or below the floor the score is only an upper bound: a move that ties
+        // the best that way (a forced win scored without distance) need not win
+        entry.exact = floor === -Infinity || entry.score > floor;
+        iteration.push({ move: entry.move, score: entry.score, exact: entry.exact });
         if (entry.score > alpha) alpha = entry.score;
       }
     } catch (e) {
@@ -432,9 +435,9 @@ export function chooseMove(s: VectorState, budgetMs: number, options: SearchOpti
     // depth, an alternative that has not been re-searched yet must still win over it.
     if (iteration.length > 0) {
       scored = timedOut
-        ? root.filter((e) => e.score > -Infinity).map((e) => ({ move: e.move, score: e.score }))
+        ? root.filter((e) => e.score > -Infinity).map((e) => ({ move: e.move, score: e.score, exact: e.exact }))
         : iteration;
-      bestScore = Math.max(...scored.map((m) => m.score));
+      bestScore = Math.max(...scored.filter((m) => m.exact).map((m) => m.score));
       reachedDepth = d;
     }
     if (timedOut) break;
@@ -443,7 +446,7 @@ export function chooseMove(s: VectorState, budgetMs: number, options: SearchOpti
   }
 
   const margin = Math.abs(bestScore) >= WIN - 100 ? 0 : randomMargin;
-  const candidates = scored.filter((m) => m.score >= bestScore - margin);
+  const candidates = scored.filter((m) => m.exact && m.score >= bestScore - margin);
   const pick = candidates[Math.floor(Math.random() * candidates.length)];
   return { move: pick.move, score: bestScore, depth: reachedDepth, nodes: ctx.nodes };
 }
