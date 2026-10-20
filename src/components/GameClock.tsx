@@ -4,6 +4,7 @@ import { ClockState, formatClock, timeLeft } from '../utils/clock';
 
 interface GameClockProps {
   clock: ClockState;
+  paused?: boolean; // stopped while the tab is not focused
   onTimeout: (team: Team) => void;
 }
 
@@ -11,7 +12,7 @@ interface GameClockProps {
  * Both sides' clocks. Ticks on its own so the rest of the app does not re-render
  * every frame, and reports when the running side's time is up.
  */
-export const GameClock: React.FC<GameClockProps> = ({ clock, onTimeout }) => {
+export const GameClock: React.FC<GameClockProps> = ({ clock, paused, onTimeout }) => {
   const [now, setNow] = useState<number>(() => Date.now());
 
   useEffect(() => {
@@ -60,6 +61,7 @@ export const GameClock: React.FC<GameClockProps> = ({ clock, onTimeout }) => {
           </div>
         );
       })}
+      {paused && <span className="text-xs text-slate-400 uppercase tracking-wide">Paused</span>}
     </div>
   );
 };

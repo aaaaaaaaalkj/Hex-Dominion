@@ -168,6 +168,19 @@ export default function App() {
   const [clock, setClock] = useState<ClockState | null>(null);
   const clockRef = React.useRef(clock);
   clockRef.current = clock;
+  // The clock pauses while the tab is hidden or the window is not focused
+  const [focused, setFocused] = useState(() => !document.hidden && document.hasFocus());
+  useEffect(() => {
+    const update = () => setFocused(!document.hidden && document.hasFocus());
+    document.addEventListener('visibilitychange', update);
+    window.addEventListener('focus', update);
+    window.addEventListener('blur', update);
+    return () => {
+      document.removeEventListener('visibilitychange', update);
+      window.removeEventListener('focus', update);
+      window.removeEventListener('blur', update);
+    };
+  }, []);
 
   // Start a fresh match with the given ruleset
   const startMatch = useCallback((nextMode: GameMode) => {
@@ -572,11 +585,12 @@ export default function App() {
     };
   }, [opponent, currentTurn, gameEnded, turnTrigger]);
 
-  // Clock: run the side on turn once the first move is made; stop when the game ends
+  // Clock: run the side on turn once the first move is made; stop when the game
+  // ends, and while the tab is not focused
   useEffect(() => {
-    const next = gameEnded || moveCount === 0 ? null : currentTurn;
+    const next = gameEnded || moveCount === 0 || !focused ? null : currentTurn;
     setClock((c) => (c ? switchClock(c, next, Date.now()) : c));
-  }, [currentTurn, turnTrigger, gameEnded, moveCount]);
+  }, [currentTurn, turnTrigger, gameEnded, moveCount, focused]);
 
   // Clock: a side whose time runs out loses
   const handleTimeout = useCallback((loser: Team) => {
@@ -785,7 +799,7 @@ export default function App() {
       )}
 
       {/* 1.5 CLOCKS (when playing with a time control) */}
-      {clock && <GameClock clock={clock} onTimeout={handleTimeout} />}
+      {clock && <GameClock clock={clock} paused={!focused && !gameEnded && moveCount > 0} onTimeout={handleTimeout} />}
       </div>
 
       {/* 2. TOP RIGHT FLOATING CONTROLS: Utility Buttons */}
