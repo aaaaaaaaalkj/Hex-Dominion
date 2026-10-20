@@ -42,6 +42,11 @@ scope.onmessage = (e) => {
       ? chooseAIAction(state, tiles, options)
       : DOMINION_AI === 'concentration'
         ? chooseConcentrationAction(state, tiles)
-        : chooseDominionAction(state, tiles, DOMINION_AI === 'network' ? { ...options, evaluator: network() } : options);
+        : chooseDominionAction(
+            state,
+            tiles,
+            // The network is slow to evaluate, so it gets the full time in quiet positions too
+            DOMINION_AI === 'network' ? { ...options, quietTimeLimitMs: undefined, evaluator: network() } : options
+          );
   scope.postMessage({ requestId, result });
 };
