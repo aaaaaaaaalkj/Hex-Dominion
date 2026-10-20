@@ -10,7 +10,7 @@ import valueNetFile from '../data/value-net.json';
 // hand-written evaluation, the same search scoring positions with the value
 // network (valueNet.ts, weights from ml/export.py), or the experimental
 // concentration bot (concentrationAI.ts).
-const DOMINION_AI = 'concentration' as 'search' | 'network' | 'concentration';
+const DOMINION_AI = 'network' as 'search' | 'network' | 'concentration';
 
 let networkEvaluator: Evaluator | undefined;
 const network = () => (networkEvaluator ??= netEvaluator(createValueNet(valueNetFile as unknown as ValueNetFile)));
