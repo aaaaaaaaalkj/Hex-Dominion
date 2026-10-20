@@ -14,10 +14,12 @@ import os
 import sys
 import time
 
-# Cap every thread pool (NumPy's BLAS, PyTorch's OpenMP) before they start
+# Cap every thread pool before they start: PyTorch's OpenMP gets --threads, and
+# NumPy's BLAS one thread (its matrices are small, and idle BLAS threads spin)
 _threads = sys.argv[sys.argv.index('--threads') + 1] if '--threads' in sys.argv else '3'
-for _var in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'):
-    os.environ.setdefault(_var, _threads)
+os.environ.setdefault('OMP_NUM_THREADS', _threads)
+for _var in ('OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'):
+    os.environ.setdefault(_var, '1')
 from collections import Counter, defaultdict
 from pathlib import Path
 
