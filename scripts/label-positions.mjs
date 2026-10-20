@@ -7,12 +7,15 @@
  *   node scripts/label-positions.mjs <out.rec> [minutes=60] [budgetMs=1000] [units=5-20]
  *
  * Games start from a random opening and are played to the end by the alpha-beta
- * engine with a random margin, so they differ; a game ends early once a
- * tablebase covers it (four units or fewer). Every few plies a position with one
- * of the requested unit counts (e.g. 5,6 or 5-20) is a candidate, and PER_GAME
+ * engine with a random margin, so they differ ($PLAY_MS per move, default 20);
+ * a game ends early once a tablebase covers it (four units or fewer). Every few
+ * plies a position with one of the requested unit counts (e.g. 5,6 or 5-20) and
+ * more than one legal move (a forced move is not searched) is a candidate, and PER_GAME
  * random candidates per game are kept. Each kept position is searched for
  * budgetMs with the tablebases in tablebase/ as a probe, so captures into four
- * units or fewer are exact.
+ * units or fewer are exact. With $VALUE_NET (weights from ml/export.py, e.g.
+ * src/data/value-net.json) the engine scores positions with that network, both
+ * while playing and while labelling: a self-play round.
  *
  * Both labels are from the side to move's point of view. value: +1/-1 when the
  * search proves a win or loss, otherwise tanh(score / SCALE). result: +1/-1 when
@@ -27,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { createStore } from './lib/tablebase-store.mjs';
 
-const PLAY_MS = 20; // per move while playing the games
+const PLAY_MS = Number(process.env.PLAY_MS ?? 20); // per move while playing the games
 const PLAY_MARGIN = 60; // random margin while playing, for varied games
 const OPENING_PLIES = 6;
 const MAX_PLIES = 400;
@@ -46,7 +49,17 @@ const server = await createServer({
 });
 const { generateGameMap } = await server.ssrLoadModule('/src/utils/mapGenerator.ts');
 const V = await server.ssrLoadModule('/src/utils/vectorEngine.ts');
+const NET = await server.ssrLoadModule('/src/utils/valueNet.ts');
 await server.close();
+
+let evaluator; // the hand-written evaluation unless $VALUE_NET is set
+if (process.env.VALUE_NET) {
+  const file = JSON.parse(fs.readFileSync(process.env.VALUE_NET, 'utf8'));
+  const net = NET.createValueNet(file);
+  const error = NET.selfTest(file, net);
+  if (Math.abs(error) > 1e-4) throw new Error(`Value network self-test off by ${error}`);
+  evaluator = NET.netEvaluator(net);
+}
 
 const [out, minutes = '60', budget = '1000', unitArg = '5-20'] = process.argv.slice(2);
 if (!out) {
@@ -73,8 +86,7 @@ function record(s, value, result) {
 }
 
 function label(s) {
-  const { ranked } = V.analyze(s, Number(budget), 30, store.probe);
-  const score = s.side === -1 ? ranked[0].score : -ranked[0].score; // mover's view
+  const { score } = V.chooseMove(s, Number(budget), { evaluator, probe: store.probe }); // mover's view
   const proven = Math.abs(score) >= store.TB_WIN - 1000;
   return { value: proven ? Math.sign(score) : Math.tanh(score / SCALE), proven };
 }
@@ -95,11 +107,11 @@ while (Date.now() < deadline) {
     if (s.winner) { winner = s.winner; break; }
     const exact = store.probe(s); // Red's point of view
     if (exact != null) { winner = -Math.sign(exact); break; }
-    if (wanted.has(countUnits(s)) && ++sinceKept >= KEEP_EVERY) {
+    if (wanted.has(countUnits(s)) && ++sinceKept >= KEEP_EVERY && V.legalMoves(s).length > 1) {
       candidates.push(s);
       sinceKept = 0;
     }
-    s = V.applyMove(s, V.chooseMove(s, PLAY_MS, { randomMargin: PLAY_MARGIN, probe: store.probe }).move);
+    s = V.applyMove(s, V.chooseMove(s, PLAY_MS, { randomMargin: PLAY_MARGIN, evaluator, probe: store.probe }).move);
   }
   games++;
   // PER_GAME random candidates, in game order

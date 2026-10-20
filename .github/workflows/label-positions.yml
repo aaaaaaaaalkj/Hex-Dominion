@@ -22,6 +22,12 @@ on:
       units:
         description: "Unit counts to collect, e.g. 5,6 or 5-20"
         default: "5-20"
+      net:
+        description: "Value network to play and label with (self-play), e.g. src/data/value-net.json; empty for the hand-written evaluation"
+        default: ""
+      play_ms:
+        description: "Search time per move while playing the games in ms"
+        default: "20"
 
 permissions:
   contents: read
@@ -68,7 +74,10 @@ jobs:
           MINUTES: ${{ inputs.minutes }}
           BUDGET: ${{ inputs.budget }}
           UNITS: ${{ inputs.units }}
+          VALUE_NET: ${{ inputs.net }}
+          PLAY_MS: ${{ inputs.play_ms }}
         run: |
+          [ -n "$VALUE_NET" ] || unset VALUE_NET
           mkdir -p positions
           for w in $(seq 1 "$(nproc)"); do
             node scripts/label-positions.mjs "positions/${{ matrix.job }}-$w.rec" "$MINUTES" "$BUDGET" "$UNITS" > "positions/${{ matrix.job }}-$w.log" &
