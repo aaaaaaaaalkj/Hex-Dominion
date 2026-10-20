@@ -9,11 +9,11 @@
  *   search:<ms>[:depth=N,forced=R] the alpha-beta engine (vectorEngine.ts) with <ms> per move,
  *                                  searching at most N plies deep; units of rank >= R (4 King,
  *                                  3 General) may not stand pat in the quiescence search
- *   net:<ms>[:depth=N,units=N,forced=R]
+ *   net:<ms>[:depth=N,units=N,forced=R,file=F]
  *                                  the alpha-beta engine scoring positions with the value
  *                                  network (valueNet.ts) where at most N units are left, and
  *                                  with the hand-written evaluation elsewhere; the weights
- *                                  are $VALUE_NET or ml/checkpoints/value-net.json (ml/export.py)
+ *                                  are F, $VALUE_NET or ml/checkpoints/value-net.json (ml/export.py)
  *   conc[:key=value,...]           the concentration bot (concentrationAI.ts); keys override
  *                                  DEFAULT_WEIGHTS, e.g. conc:mobility=8,plies=2
  *   hybrid:<ms>[:key=value,...]    the alpha-beta engine scoring positions with the
@@ -50,14 +50,12 @@ const searchOptions = (arg) => {
   return { maxDepth: Number(depth), forcedRank: forced ? Number(forced) : undefined };
 };
 
-let valueNet;
-function loadNet() {
-  if (valueNet) return valueNet;
-  const file = JSON.parse(fs.readFileSync(process.env.VALUE_NET ?? path.join(root, 'ml/checkpoints/value-net.json'), 'utf8'));
-  valueNet = NET.createValueNet(file);
-  const error = NET.selfTest(file, valueNet);
+function loadNet(name = process.env.VALUE_NET ?? path.join(root, 'ml/checkpoints/value-net.json')) {
+  const file = JSON.parse(fs.readFileSync(name, 'utf8'));
+  const net = NET.createValueNet(file);
+  const error = NET.selfTest(file, net);
   if (Math.abs(error) > 1e-4) throw new Error(`Value network self-test off by ${error}`);
-  return valueNet;
+  return net;
 }
 
 function weights(arg) {
@@ -78,8 +76,8 @@ function strategy(spec) {
     return (s) => V.chooseMove(s, Number(arg || 50), o);
   }
   if (kind === 'net') {
-    const { units = Infinity } = options(arg2);
-    const o = { ...searchOptions(arg2), evaluator: NET.netEvaluator(loadNet(), Number(units)) };
+    const { units = Infinity, file } = options(arg2);
+    const o = { ...searchOptions(arg2), evaluator: NET.netEvaluator(loadNet(file), Number(units)) };
     return (s) => V.chooseMove(s, Number(arg || 50), o);
   }
   if (kind === 'conc') {
