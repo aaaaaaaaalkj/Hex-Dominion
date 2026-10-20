@@ -6,10 +6,12 @@
  *
  * Strategies:
  *   random                         uniformly random legal moves
- *   search:<ms>[:depth=N,forced=R] the alpha-beta engine (vectorEngine.ts) with <ms> per move,
+ *   search:<ms>[:depth=N,forced=R,ext=1]
+ *                                  the alpha-beta engine (vectorEngine.ts) with <ms> per move,
  *                                  searching at most N plies deep; units of rank >= R (4 King,
- *                                  3 General) may not stand pat in the quiescence search
- *   net:<ms>[:depth=N,units=N,forced=R,file=F]
+ *                                  3 General) may not stand pat in the quiescence search; ext=1
+ *                                  extends single legal moves (SearchOptions.extendForced)
+ *   net:<ms>[:depth=N,units=N,forced=R,ext=1,file=F]
  *                                  the alpha-beta engine scoring positions with the value
  *                                  network (valueNet.ts) where at most N units are left, and
  *                                  with the hand-written evaluation elsewhere; the weights
@@ -46,8 +48,8 @@ const NET = await server.ssrLoadModule('/src/utils/valueNet.ts');
 
 const options = (arg) => Object.fromEntries(arg.split(',').filter(Boolean).map((kv) => kv.split('=')));
 const searchOptions = (arg) => {
-  const { depth = 30, forced } = options(arg);
-  return { maxDepth: Number(depth), forcedRank: forced ? Number(forced) : undefined };
+  const { depth = 30, forced, ext } = options(arg);
+  return { maxDepth: Number(depth), forcedRank: forced ? Number(forced) : undefined, extendForced: ext === '1' };
 };
 
 function loadNet(name = process.env.VALUE_NET ?? path.join(root, 'ml/checkpoints/value-net.json')) {

@@ -218,6 +218,8 @@ export const WIN = 1_000_000;
 const VALUE = [0, 100, 400, 250, 0];
 // Captures resolved past the horizon before a position is scored
 const MAX_QUIESCENCE_DEPTH = 6;
+// Forced moves (a single legal move) searched without using up depth, per line
+const MAX_FORCED_EXTENSIONS = 4;
 
 /** Score from Red's (ai, -1) point of view: material plus influenced-tile balance. */
 export function evaluate(s: VectorState): number {
@@ -241,6 +243,7 @@ interface SearchContext {
   evaluate: Evaluator;
   probe?: Prober;
   forcedRank?: number;
+  extendForced?: boolean;
 }
 
 /** Static score of a non-terminal position from Red's point of view (|score| well below WIN). */
@@ -264,6 +267,8 @@ function tick(ctx: SearchContext) {
  * middle of an exchange. The side to move may "stand pat" on the static score
  * instead of capturing, except when the unit due to move has at least
  * ctx.forcedRank: a King or General must move (zugzwang), so all its moves are tried.
+ * With ctx.extendForced, a single legal move (other than a pass) is always played:
+ * the obligation to move can walk a King into a capture.
  */
 function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext, qDepth: number): number {
   tick(ctx);
@@ -273,7 +278,10 @@ function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext
   if (s.winner || qDepth >= MAX_QUIESCENCE_DEPTH) return standPat;
   const maximizing = s.side === -1;
   const legal = legalMoves(s);
-  const forced = ctx.forcedRank !== undefined && legal[0] !== PASS && Math.abs(s.u[legal[0] >> 7]) >= ctx.forcedRank;
+  const forced =
+    legal[0] !== PASS &&
+    ((ctx.extendForced && legal.length === 1) ||
+      (ctx.forcedRank !== undefined && Math.abs(s.u[legal[0] >> 7]) >= ctx.forcedRank));
   if (!forced) {
     if (maximizing) {
       if (standPat >= beta) return standPat;
@@ -295,7 +303,9 @@ function quiesce(s: VectorState, alpha: number, beta: number, ctx: SearchContext
   return best;
 }
 
-function search(s: VectorState, depth: number, alpha: number, beta: number, ctx: SearchContext): number {
+// With ctx.extendForced, a single legal move does not use up depth (at most
+// MAX_FORCED_EXTENSIONS times per line, counted by `extended`)
+function search(s: VectorState, depth: number, alpha: number, beta: number, ctx: SearchContext, extended = 0): number {
   if (s.winner) {
     const v = evaluate(s);
     return v === WIN ? v + depth : v - depth; // prefer quicker wins, slower losses
@@ -313,11 +323,14 @@ function search(s: VectorState, depth: number, alpha: number, beta: number, ctx:
   }
   const moves = legalMoves(s);
   moves.sort((a, b) => captureKey(s, b) - captureKey(s, a));
+  const extend = ctx.extendForced && moves.length === 1 && moves[0] !== PASS && extended < MAX_FORCED_EXTENSIONS;
   const maximizing = s.side === -1;
   const a0 = alpha, b0 = beta;
   let best = maximizing ? -Infinity : Infinity;
   for (const m of moves) {
-    const v = search(applyMove(s, m), depth - 1, alpha, beta, ctx);
+    const v = extend
+      ? search(applyMove(s, m), depth, alpha, beta, ctx, extended + 1)
+      : search(applyMove(s, m), depth - 1, alpha, beta, ctx, extended);
     if (maximizing) { if (v > best) best = v; if (v > alpha) alpha = v; }
     else { if (v < best) best = v; if (v < beta) beta = v; }
     if (alpha >= beta) break;
@@ -367,6 +380,8 @@ export interface SearchOptions {
   probe?: Prober;
   /** Units of at least this rank may not stand pat in the quiescence search (see quiesce). */
   forcedRank?: number;
+  /** Single legal moves cost no depth and are played in the quiescence search (see search). */
+  extendForced?: boolean;
 }
 
 /**
@@ -375,8 +390,8 @@ export interface SearchOptions {
  * is chosen at random, unless the result is forced.
  */
 export function chooseMove(s: VectorState, budgetMs: number, options: SearchOptions = {}): VectorChoice | null {
-  const { maxDepth = 30, randomMargin = 0, evaluator = evaluate, probe, forcedRank } = options;
-  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator, probe, forcedRank };
+  const { maxDepth = 30, randomMargin = 0, evaluator = evaluate, probe, forcedRank, extendForced } = options;
+  const ctx: SearchContext = { nodes: 0, deadline: Date.now() + budgetMs, tt: [], evaluate: evaluator, probe, forcedRank, extendForced };
   const moves = legalMoves(s);
   if (moves.length === 0) return null;
   if (moves.length === 1) return { move: moves[0], score: 0, depth: 0, nodes: 0 };
