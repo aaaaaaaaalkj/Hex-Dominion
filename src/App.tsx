@@ -15,6 +15,7 @@ import { applyMove, computeInfluenceMap, countInfluencedTiles } from './utils/ga
 import { advanceTurn, applyAction, dominionMoveRank, EndReason, getUnitMoves } from './utils/gameState';
 import { isKingInCheck } from './utils/gambitRules';
 import type { AIRequest, AIResponse } from './utils/aiWorker';
+import type { SafetyRequest, SafetyResponse, TileVerdict } from './utils/safetyWorker';
 import {
   addIncrement,
   CLOCK_PRESETS,
@@ -456,6 +457,38 @@ export default function App() {
     return () => worker.terminate();
   }, []);
 
+  // Move preview (Dominion): for each destination of the selected unit, whether
+  // the unit would hold there, from a second worker (safetyWorker.ts)
+  const safetyWorkerRef = React.useRef<Worker | null>(null);
+  const safetyRequestIdRef = React.useRef(0);
+  const [tileVerdicts, setTileVerdicts] = useState<Map<string, TileVerdict>>(() => new Map());
+  useEffect(() => {
+    const worker = new Worker(new URL('./utils/safetyWorker.ts', import.meta.url), { type: 'module' });
+    safetyWorkerRef.current = worker;
+    return () => worker.terminate();
+  }, []);
+  useEffect(() => {
+    const worker = safetyWorkerRef.current;
+    const requestId = ++safetyRequestIdRef.current;
+    setTileVerdicts(new Map());
+    if (!worker || mode !== 'dominion' || selfPlay || gameEnded || currentTurn !== 'player') return;
+    if (!selectedUnit || legalMoves.length === 0) return;
+    const onMessage = (e: MessageEvent<SafetyResponse>) => {
+      const { verdict, target } = e.data;
+      if (e.data.requestId !== requestId || !verdict) return;
+      setTileVerdicts((prev) => new Map(prev).set(target, verdict));
+    };
+    worker.addEventListener('message', onMessage);
+    const request: SafetyRequest = {
+      requestId,
+      state: { mode, units, currentTurn, roundNumber, winner: null },
+      from: selectedUnit.coord,
+      targets: legalMoves.map((m) => m.target),
+    };
+    worker.postMessage(request);
+    return () => worker.removeEventListener('message', onMessage);
+  }, [mode, selfPlay, gameEnded, currentTurn, selectedUnit, legalMoves, units, roundNumber]);
+
   // AI Turn Execution Loop: red's turns, and blue's too in self-play (which waits
   // while the tab is not focused, so no moves are missed)
   useEffect(() => {
@@ -874,6 +907,7 @@ export default function App() {
           units={displayUnits}
           selectedUnit={selectedUnit}
           legalMoves={legalMoves}
+          tileVerdicts={tileVerdicts}
           currentTurn={currentTurn}
           isAiThinking={isAiThinking}
           lastMove={displayLastMove}

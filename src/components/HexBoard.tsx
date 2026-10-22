@@ -21,6 +21,7 @@ import {
   applyMove,
 } from '../utils/gameRules';
 import { isKingInCheck } from '../utils/gambitRules';
+import type { SafetyStep, TileVerdict } from '../utils/safetyWorker';
 import { SvgUnitPiece } from './SvgUnitPiece';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
@@ -32,6 +33,23 @@ const TEAM_RGB: Record<Team, string> = {
   ai: '225, 29, 72',
 };
 
+// Move preview: how a destination fares (tileSafety.ts)
+const VERDICT_COLOR: Record<TileVerdict['status'], string> = {
+  safe: '#34d399',
+  threatened: '#f59e0b',
+  lost: '#ef4444',
+};
+
+const ordinal = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
+
+function verdictText(v: TileVerdict): string {
+  if (v.status === 'lost') return `FALLS ON RED'S ${ordinal(v.attackerMove!)} MOVE`;
+  if (v.status === 'safe') return `HOLDS FOR ${v.horizon} RED MOVES`;
+  return v.defences.length
+    ? `RED THREAT ON ITS ${ordinal(v.attackerMove!)} MOVE · COVER IT BY YOUR ${ordinal(v.ownerMove!)}`
+    : `RED THREAT ON ITS ${ordinal(v.attackerMove!)} MOVE`;
+}
+
 // Gambit board: three tile colors (like the two colors of a chess board)
 const GAMBIT_TILE_COLORS = ['#374357', '#2a3445', '#1d2533'];
 
@@ -41,6 +59,7 @@ interface HexBoardProps {
   units: Unit[];
   selectedUnit: Unit | null;
   legalMoves: LegalMove[];
+  tileVerdicts?: Map<string, TileVerdict>;
   currentTurn: Team;
   isAiThinking: boolean;
   lastMove?: MoveRecord | null;
@@ -58,6 +77,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
   units,
   selectedUnit,
   legalMoves,
+  tileVerdicts,
   currentTurn,
   isAiThinking,
   lastMove,
@@ -154,6 +174,8 @@ export const HexBoard: React.FC<HexBoardProps> = ({
       units.filter((u) => u.id !== selectedUnit.id)
     );
   }, [isGambit, tiles, units, selectedUnit, hoveredMove]);
+
+  const hoveredVerdict = hoveredMove ? tileVerdicts?.get(coordKey(hoveredMove.target)) : undefined;
 
   // Legal moves grouped by target tile (several only for Gambit Scout facings)
   const movesByTarget = useMemo(() => {
@@ -293,6 +315,13 @@ export const HexBoard: React.FC<HexBoardProps> = ({
             <stop offset="100%" stopColor="#0b0f19" stopOpacity="0.85" />
           </linearGradient>
 
+          {/* Arrowheads for the move preview lines */}
+          {(['ai', 'player', 'faint'] as const).map((k) => (
+            <marker key={k} id={`arrow-${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill={k === 'ai' ? '#f87171' : k === 'player' ? '#38bdf8' : 'rgba(148, 163, 184, 0.7)'} />
+            </marker>
+          ))}
+
           <filter id="unit-shadow" x="-50%" y="-50%" width="200%" height="200%">
             <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000000" floodOpacity="0.7" />
           </filter>
@@ -316,6 +345,7 @@ export const HexBoard: React.FC<HexBoardProps> = ({
               const isAttack = tileMoves?.some((m) => m.isAttack);
               const isSelectedTile = selectedUnit && coordKey(selectedUnit.coord) === key;
               const isHoveredTarget = hoveredMove !== null && coordKey(hoveredMove.target) === key;
+              const verdict = isTarget ? tileVerdicts?.get(key) : undefined;
 
               // Influence shading: deeper shade = stronger net influence
               const influence = influenceMap.get(key) ?? 0;
@@ -393,15 +423,20 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                     pointerEvents="none"
                   />
 
-                  {/* Move target: small neutral dot (captures are marked by a ring on the unit) */}
+                  {/* Move target: small dot, colored once its preview is known (captures are
+                      marked by a ring on the unit, their preview by a pip below it) */}
                   {isTarget && !isAttack && (
                     <circle
                       cx={x}
                       cy={y}
-                      r={isHoveredTarget ? 5 : 4}
-                      fill={`rgba(255, 255, 255, ${isHoveredTarget ? 0.5 : 0.22})`}
+                      r={isHoveredTarget ? 5.5 : 4.5}
+                      fill={verdict ? VERDICT_COLOR[verdict.status] : `rgba(255, 255, 255, ${isHoveredTarget ? 0.5 : 0.22})`}
+                      fillOpacity={verdict ? (isHoveredTarget ? 1 : 0.75) : 1}
                       pointerEvents="none"
                     />
+                  )}
+                  {isTarget && isAttack && verdict && (
+                    <circle cx={x} cy={y + 30} r="3.5" fill={VERDICT_COLOR[verdict.status]} pointerEvents="none" />
                   )}
                 </g>
               );
@@ -458,6 +493,11 @@ export const HexBoard: React.FC<HexBoardProps> = ({
                   </g>
                 )}
             </g>
+          )}
+
+          {/* 2b. MOVE PREVIEW: how the destination fares (Red's line, your answers) */}
+          {hoveredMove && selectedUnit && hoveredVerdict && (
+            <SafetyPreview verdict={hoveredVerdict} target={hoveredMove.target} hexRadius={hexRadius} />
           )}
 
           {/* 3. LAST MOVE HIGHLIGHT LAYER (subtle path; badge only once the game is over) */}
@@ -623,3 +663,93 @@ export const HexBoard: React.FC<HexBoardProps> = ({
     </div>
   );
 };
+
+// An arrow between two tiles, shortened at both ends so it does not cover the units
+function StepArrow({ step, hexRadius, kind, dashed }: { step: SafetyStep; hexRadius: number; kind: 'ai' | 'player' | 'faint'; dashed?: boolean }) {
+  const a = hexToPixel(step.from, hexRadius), b = hexToPixel(step.to, hexRadius);
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+  const color = kind === 'ai' ? '#f87171' : kind === 'player' ? '#38bdf8' : 'rgba(148, 163, 184, 0.7)';
+  return (
+    <line
+      x1={a.x + ux * 14}
+      y1={a.y + uy * 14}
+      x2={b.x - ux * 16}
+      y2={b.y - uy * 16}
+      stroke={color}
+      strokeWidth={kind === 'faint' ? 1.4 : 2.2}
+      strokeDasharray={dashed ? '4 4' : undefined}
+      strokeLinecap="round"
+      markerEnd={`url(#arrow-${kind})`}
+    />
+  );
+}
+
+/**
+ * The move preview for the hovered destination: a badge with the verdict, Red's
+ * line (numbered by Red's moves), your moves that keep the unit, and Red's
+ * next-move captures of your other units.
+ */
+function SafetyPreview({ verdict, target, hexRadius }: { verdict: TileVerdict; target: HexCoord; hexRadius: number }) {
+  const t = hexToPixel(target, hexRadius);
+  const text = verdictText(verdict);
+  const width = text.length * 5.6 + 22;
+  const color = VERDICT_COLOR[verdict.status];
+  const others = verdict.immediate.filter((s) => !areCoordsEqual(s.to, target));
+  let redMove = 0;
+  return (
+    <g id="safety-preview-layer" pointerEvents="none">
+      {/* Red's next-move captures elsewhere: ring the victim */}
+      {others.map((s, i) => {
+        const v = hexToPixel(s.to, hexRadius);
+        return (
+          <g key={`imm-${i}`}>
+            <StepArrow step={s} hexRadius={hexRadius} kind="ai" dashed />
+            <circle cx={v.x} cy={v.y} r={hexRadius - 12} fill="none" stroke="#f87171" strokeWidth="1.8" strokeDasharray="5 3" />
+          </g>
+        );
+      })}
+
+      {/* The line: Red's moves numbered, your moves on it faint */}
+      {verdict.line.map((s, i) => {
+        if (s.team !== 'ai') return <StepArrow key={`line-${i}`} step={s} hexRadius={hexRadius} kind="faint" dashed />;
+        redMove++;
+        const p = hexToPixel(s.to, hexRadius);
+        return (
+          <g key={`line-${i}`}>
+            <StepArrow step={s} hexRadius={hexRadius} kind="ai" />
+            <g transform={`translate(${p.x + 17}, ${p.y - 17})`}>
+              <circle r="7.5" fill="#450a0a" stroke="#f87171" strokeWidth="1.2" />
+              <text y="3" textAnchor="middle" fill="#fecaca" fontSize="8.5" fontWeight="800" fontFamily="monospace">
+                {redMove}
+              </text>
+            </g>
+          </g>
+        );
+      })}
+
+      {/* Your answers */}
+      {verdict.defences.slice(0, 4).map((s, i) => (
+        <StepArrow key={`def-${i}`} step={s} hexRadius={hexRadius} kind="player" />
+      ))}
+
+      {/* Verdict badge below the destination */}
+      <g transform={`translate(${t.x}, ${t.y + 36})`}>
+        <rect
+          x={-width / 2}
+          y="-11"
+          width={width}
+          height="22"
+          rx="11"
+          fill="#090d16"
+          stroke={color}
+          strokeWidth="1.6"
+          filter="drop-shadow(0 4px 6px rgba(0,0,0,0.8))"
+        />
+        <text x="0" y="3.5" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="900" fontFamily="monospace" letterSpacing="0.4">
+          {text}
+        </text>
+      </g>
+    </g>
+  );
+}
