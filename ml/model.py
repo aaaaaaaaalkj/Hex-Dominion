@@ -32,10 +32,10 @@ class Block(nn.Module):
 
 
 class ValueNet(nn.Module):
-    def __init__(self, channels=32, blocks=4):
+    def __init__(self, channels=32, blocks=4, planes=N_PLANES):
         super().__init__()
         self.register_buffer('mask', torch.from_numpy(board_mask())[None, None])
-        self.stem = HexConv(N_PLANES, channels)
+        self.stem = HexConv(planes, channels)
         self.bn = nn.BatchNorm2d(channels)
         self.blocks = nn.ModuleList(Block(channels) for _ in range(blocks))
         self.head = nn.Sequential(nn.Linear(2 * channels, 64), nn.ReLU(), nn.Linear(64, 1))

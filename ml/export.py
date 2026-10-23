@@ -15,7 +15,7 @@ import sys
 import numpy as np
 import torch
 
-from hexdata import encode
+from hexdata import N_BASE, encode
 from model import ValueNet
 
 # Kernel index (i, j) reads grid cell (q + i - 1, r + j - 1); (0, 0) and (2, 2) are masked
@@ -40,20 +40,21 @@ def linear(fc):
 
 src, dst = sys.argv[1], sys.argv[2]
 ck = torch.load(src)
-model = ValueNet(ck['channels'], ck['blocks'])
+planes = ck.get('planes', N_BASE)
+model = ValueNet(ck['channels'], ck['blocks'], planes)
 model.load_state_dict(ck['model'])
 model.eval()
 
-# A test position: a random 6-unit placement
+# A test position: a random placement of 16 units, packed enough for captures
 rng = np.random.default_rng(0)
 u = np.zeros((1, 61), np.int8)
-tiles = rng.choice(61, 6, replace=False)
-u[0, tiles] = [4, 3, 1, -4, -2, -1]
+tiles = rng.choice(np.arange(10, 51), 16, replace=False)
+u[0, tiles] = [4, 3, 3, 2, 1, 1, 1, 1, -4, -3, -2, -2, -1, -1, -1, -1]
 moved = np.zeros((1, 61), np.uint8)
-moved[0, tiles[2]] = 1
+moved[0, tiles[[1, 4, 9, 12]]] = 1
 side = np.array([-1], np.int8)
 with torch.no_grad():
-    out = float(model(torch.from_numpy(encode(u, moved, side)))[0])
+    out = float(model(torch.from_numpy(encode(u, moved, side, planes)))[0])
 
 net = {
     'channels': ck['channels'],

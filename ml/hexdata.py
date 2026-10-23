@@ -55,14 +55,70 @@ def _symmetries():
 SYMS = _symmetries()  # SYMS[g][p] = image of tile p
 SYMS_INV = np.argsort(SYMS, axis=1)  # u'[p] = u[SYMS_INV[g][p]]
 
-N_PLANES = 14
+# Movement neighbours (the closed neighbourhood without the tile itself)
+ADJ = CLOSED - np.eye(P, dtype=np.float32)
+
+N_BASE = 14  # the planes of the first networks
+N_PLANES = 21  # with the tactical planes (tactics)
 
 
-def encode(u, moved, side):
-    """(B, 61) arrays -> (B, 14, 9, 9) float32 planes from the side to move's view."""
+def tactics(own, moved):
+    """Tactical planes 14-20 from the side to move's view (own > 0), as (B, 7, 61):
+      14  own units an unmoved opponent unit can capture now
+      15  opponent units an unmoved own unit can capture now
+      16  own units any opponent unit could capture if it were free to move
+      17  opponent units any own unit could capture if it were free to move
+      18  own units that can reach the tile (as a move or a capture) / 4, moved or not
+      19  the same for the opponent
+      20  constant: the side to move starts the next round (it has no more unmoved
+          units than the opponent, so the opponent makes the round's last move)
+    Each unit's reach is the engine's move search (unitMoves) on the current board,
+    ignoring rank order and its own moved flag."""
+    b = len(own)
+    f = np.zeros((b, 7, P), dtype=np.float32)
+    infl = own.astype(np.float32) @ CLOSED
+    occ = own != 0
+    counts = occ.sum(1)
+    order = np.argsort(~occ, axis=1, kind='stable')
+    for k in range(counts.max(initial=0)):
+        sel = np.flatnonzero(counts > k)
+        rows = np.arange(len(sel))
+        t = order[sel, k]
+        v = own[sel, t].astype(np.int16)
+        g, r = np.sign(v), np.abs(v)
+        rel = own[sel] * g[:, None]  # + friend, - enemy
+        empty, friend, enemy = rel == 0, rel > 0, rel < 0
+        # Combat: the attacker's side wins the target's neighbourhood, counting the
+        # attacker once (already there if it starts adjacent to the target)
+        capturable = enemy & (g[:, None] * infl[sel] + np.where(ADJ[t] > 0, 0, r[:, None]) > 0)
+        frontier = np.zeros((len(sel), P), dtype=bool)
+        frontier[rows, t] = True
+        visited = frontier.copy()
+        reach = np.zeros_like(frontier)
+        for step in range(1, 5):
+            nb = ((frontier.astype(np.float32) @ ADJ) > 0) & ~visited & (5 - r >= step)[:, None]
+            reach |= nb & (empty | capturable)
+            visited |= nb
+            frontier = nb & ~enemy
+        caps = reach & enemy
+        mine = (g > 0)[:, None]
+        now = (moved[sel, t] == 0)[:, None]
+        f[sel, 0] = np.maximum(f[sel, 0], caps & ~mine & now)
+        f[sel, 1] = np.maximum(f[sel, 1], caps & mine & now)
+        f[sel, 2] = np.maximum(f[sel, 2], caps & ~mine)
+        f[sel, 3] = np.maximum(f[sel, 3], caps & mine)
+        f[sel, 4] += (reach & mine) / 4
+        f[sel, 5] += (reach & ~mine) / 4
+    unmoved = moved == 0
+    f[:, 6] = ((occ & unmoved & (own > 0)).sum(1) <= (occ & unmoved & (own < 0)).sum(1))[:, None]
+    return f
+
+
+def encode(u, moved, side, planes=N_PLANES):
+    """(B, 61) arrays -> (B, planes, 9, 9) float32 planes from the side to move's view."""
     b = len(u)
     own = u.astype(np.int16) * side[:, None].astype(np.int16)  # + own, - opponent
-    f = np.zeros((b, N_PLANES, P), dtype=np.float32)
+    f = np.zeros((b, planes, P), dtype=np.float32)
     for rank in range(1, 5):
         f[:, rank - 1] = own == rank
         f[:, 3 + rank] = own == -rank
@@ -76,7 +132,9 @@ def encode(u, moved, side):
         top = ranks.max(axis=1, keepdims=True)
         f[:, plane] = (ranks == top) & (top > 0)
     f[:, 13] = 1
-    grid = np.zeros((b, N_PLANES, GRID, GRID), dtype=np.float32)
+    if planes > N_BASE:
+        f[:, N_BASE:] = tactics(own, moved)
+    grid = np.zeros((b, planes, GRID, GRID), dtype=np.float32)
     grid[:, :, GRID_Q, GRID_R] = f
     return grid
 

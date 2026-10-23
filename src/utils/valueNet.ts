@@ -7,7 +7,7 @@
  * The network sees the board from the side to move and returns its expected
  * result in (-1, 1); netEvaluator turns that into a search score.
  */
-import { closed, coords, evaluate, Evaluator, hashKey, playableTiles, tileIndex, VectorState } from './vectorEngine';
+import { closed, coords, evaluate, Evaluator, hashKey, playable, playableTiles, tileIndex, VectorState } from './vectorEngine';
 
 interface Layer { w: Float32Array; b: Float32Array }
 interface RawLayer { w: string; b: string }
@@ -128,6 +128,84 @@ function wasmConv(C: number, P: number, T: number, nbr: Int32Array, layers: Laye
   }
 }
 
+const N_BASE = 14; // the planes of the first networks; later ones add the tactical planes
+
+/** The `planes` input planes (ml/hexdata.py encode) from the side to move's view, tile-major. */
+export function encode(s: VectorState, planes: number, input: Float32Array) {
+  const F = planes;
+  input.fill(0);
+  let ownTop = 0, oppTop = 0;
+  for (const t of playableTiles) {
+    const v = s.u[t] * s.side;
+    if (!s.moved[t]) { if (v > ownTop) ownTop = v; else if (-v > oppTop) oppTop = -v; }
+  }
+  playableTiles.forEach((t, p) => {
+    const o = p * F, v = s.u[t] * s.side;
+    if (v > 0) {
+      input[o + v - 1] = 1;
+      if (s.moved[t]) input[o + 8] = 1;
+      else if (v === ownTop) input[o + 11] = 1;
+    } else if (v < 0) {
+      input[o + 3 - v] = 1;
+      if (s.moved[t]) input[o + 9] = 1;
+      else if (-v === oppTop) input[o + 12] = 1;
+    }
+    input[o + 10] = (s.I[t] * s.side) / 8;
+    input[o + 13] = 1;
+  });
+  if (F > N_BASE) tactics(s, F, input);
+}
+
+const moveNbrs = coords.map((_, i) => (playable[i] ? closed[i].slice(1).filter((j) => playable[j]) : []));
+const tileP = new Int32Array(coords.length).fill(-1);
+playableTiles.forEach((t, p) => (tileP[t] = p));
+const seen = new Uint32Array(coords.length);
+let stamp = 0;
+
+/**
+ * Planes 14-20 (ml/hexdata.py tactics): which units can be captured now (by an
+ * unmoved unit) and once everything may move again, how many units of each side
+ * reach every tile, and whether the side to move starts the next round. Each
+ * unit's reach is unitMoves on the current board, ignoring rank order and its
+ * own moved flag.
+ */
+function tactics(s: VectorState, F: number, input: Float32Array) {
+  let ownFree = 0, oppFree = 0;
+  for (const from of playableTiles) {
+    const v = s.u[from] * s.side;
+    if (!v) continue;
+    const g = v > 0 ? 1 : -1, r = v * g, now = !s.moved[from];
+    if (now) { if (g > 0) ownFree++; else oppFree++; }
+    const reachPlane = g > 0 ? 18 : 19;
+    seen[from] = ++stamp;
+    let frontier = [from];
+    for (let step = 1; step <= 5 - r && frontier.length; step++) {
+      const next: number[] = [];
+      for (const t of frontier) {
+        for (const j of moveNbrs[t]) {
+          if (seen[j] === stamp) continue;
+          seen[j] = stamp;
+          const w = s.u[j] * s.side * g; // + friend, - enemy
+          if (w < 0) {
+            // Combat: counts the attacker once (already there if it starts adjacent)
+            if (g * s.side * s.I[j] + (moveNbrs[from].includes(j) ? 0 : r) > 0) {
+              const o = tileP[j] * F;
+              input[o + reachPlane] += 0.25;
+              input[o + (g > 0 ? 17 : 16)] = 1;
+              if (now) input[o + (g > 0 ? 15 : 14)] = 1;
+            }
+            continue;
+          }
+          if (!w) input[tileP[j] * F + reachPlane] += 0.25;
+          next.push(j);
+        }
+      }
+      frontier = next;
+    }
+  }
+  if (ownFree <= oppFree) for (let p = 0; p < playableTiles.length; p++) input[p * F + 20] = 1;
+}
+
 export function createValueNet(file: ValueNetFile): ValueNet {
   const C = file.channels, F = file.planes, T = file.taps.length;
   const stem = layer(file.stem);
@@ -170,32 +248,8 @@ export function createValueNet(file: ValueNetFile): ValueNet {
 
   const relu = (x: Float32Array) => { for (let i = 0; i < x.length; i++) if (x[i] < 0) x[i] = 0; };
 
-  // Input planes (ml/hexdata.py encode) from the side to move's view
-  function encode(s: VectorState) {
-    input.fill(0);
-    let ownTop = 0, oppTop = 0;
-    for (const t of playableTiles) {
-      const v = s.u[t] * s.side;
-      if (!s.moved[t]) { if (v > ownTop) ownTop = v; else if (-v > oppTop) oppTop = -v; }
-    }
-    playableTiles.forEach((t, p) => {
-      const o = p * F, v = s.u[t] * s.side;
-      if (v > 0) {
-        input[o + v - 1] = 1;
-        if (s.moved[t]) input[o + 8] = 1;
-        else if (v === ownTop) input[o + 11] = 1;
-      } else if (v < 0) {
-        input[o + 3 - v] = 1;
-        if (s.moved[t]) input[o + 9] = 1;
-        else if (-v === oppTop) input[o + 12] = 1;
-      }
-      input[o + 10] = (s.I[t] * s.side) / 8;
-      input[o + 13] = 1;
-    });
-  }
-
   const net: ValueNet = (s) => {
-    encode(s);
+    encode(s, F, input);
     conv(input, F, a, stem);
     relu(a);
     for (const blk of blocks) {

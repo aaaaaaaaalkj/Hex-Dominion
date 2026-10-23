@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from hexdata import augment, encode, load_records, material_key, material_score, sample_table, table_names
+from hexdata import N_BASE, N_PLANES, augment, encode, load_records, material_key, material_score, sample_table, table_names
 from model import ValueNet
 
 parser = argparse.ArgumentParser()
@@ -41,8 +41,9 @@ parser.add_argument('--batch', type=int, default=512)
 parser.add_argument('--lr', type=float, default=2e-3)
 parser.add_argument('--channels', type=int, default=32)
 parser.add_argument('--blocks', type=int, default=4)
+parser.add_argument('--planes', type=int, default=N_BASE, choices=[N_BASE, N_PLANES], help=f'{N_PLANES}: add the tactical planes')
 parser.add_argument('--threads', type=int, default=3)
-parser.add_argument('--init', help='checkpoint to start from')
+parser.add_argument('--init', help='checkpoint to start from (missing input planes start at zero weight)')
 parser.add_argument('--out', default=str(Path(__file__).parent / 'checkpoints' / 'value.pt'))
 args = parser.parse_args()
 torch.set_num_threads(args.threads)
@@ -90,9 +91,14 @@ val_keys = np.array([material_key(u, s) for u, s in zip(val[0], val[2])])
 
 
 # ---- Model ----------------------------------------------------------------------
-model = ValueNet(args.channels, args.blocks)
+model = ValueNet(args.channels, args.blocks, args.planes)
 if args.init:
-    model.load_state_dict(torch.load(args.init)['model'])
+    state = torch.load(args.init)['model']
+    w = state['stem.weight']
+    if w.shape[1] < args.planes:
+        # New input planes start switched off: the network begins as the old one
+        state['stem.weight'] = torch.cat([w, w.new_zeros(w.shape[0], args.planes - w.shape[1], *w.shape[2:])], dim=1)
+    model.load_state_dict(state)
 print(f'parameters {sum(p.numel() for p in model.parameters())}', flush=True)
 steps = args.epochs * (len(train[0]) // args.batch)
 opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -104,7 +110,7 @@ def predict(data, batch=4096):
     out = []
     with torch.no_grad():
         for i in range(0, len(data[0]), batch):
-            x = encode(data[0][i:i + batch], data[1][i:i + batch], data[2][i:i + batch])
+            x = encode(data[0][i:i + batch], data[1][i:i + batch], data[2][i:i + batch], args.planes)
             out.append(model(torch.from_numpy(x)).numpy())
     model.train()
     return np.concatenate(out)
@@ -162,7 +168,7 @@ for epoch in range(args.epochs):
     for i in range(0, n - args.batch + 1, args.batch):
         idx = perm[i:i + args.batch]
         u, moved = augment(train[0][idx], train[1][idx], rng)
-        x = torch.from_numpy(encode(u, moved, train[2][idx]))
+        x = torch.from_numpy(encode(u, moved, train[2][idx], args.planes))
         y = torch.from_numpy(train[3][idx])
         loss = torch.mean((model(x) - y) ** 2)
         opt.zero_grad()
@@ -176,4 +182,4 @@ for epoch in range(args.epochs):
             print(f'  epoch {epoch + 1} step {step}/{steps}  loss {loss_sum / seen:.4f}  {seen / (time.time() - started):.0f} pos/s', flush=True)
     print(f'epoch {epoch + 1}: train loss {loss_sum / seen:.4f}  ({time.time() - started:.0f}s)', flush=True)
     metrics = report()
-    torch.save({'model': model.state_dict(), 'channels': args.channels, 'blocks': args.blocks, 'metrics': metrics}, out)
+    torch.save({'model': model.state_dict(), 'channels': args.channels, 'blocks': args.blocks, 'planes': args.planes, 'metrics': metrics}, out)
